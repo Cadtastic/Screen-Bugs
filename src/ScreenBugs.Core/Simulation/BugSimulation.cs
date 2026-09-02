@@ -13,6 +13,11 @@ public sealed class BugSimulation(Bounds bounds, IRandomSource rng)
     private const float HeadingNoise = 0.3f;
     private const float FleeTurnMultiplier = 2f;
     private const float FleeStrideMultiplier = 2f;
+    private const float FleeSafeDistanceFactor = 1.5f;
+    private const float FleeSafeDuration = 0.8f;
+    private const float FleeJitterInterval = 0.3f;
+    private const float FleeJitterMax = 20f * MathF.PI / 180f;
+    private const float MinFleeDistance = 0.01f;
 
     private readonly List<Bug> bugs = [];
     private int nextId;
@@ -123,18 +128,69 @@ public sealed class BugSimulation(Bounds bounds, IRandomSource rng)
 
     private void UpdateState(Bug bug, float dt, Vector2? cursor)
     {
+        if (bug.State == BugState.Squashed)
+        {
+            bug.Speed = 0f;
+            bug.SquashProgress += dt / SquashDuration;
+            return;
+        }
+
+        UpdateReaction(bug, cursor);
+
         switch (bug.State)
         {
-            case BugState.Squashed:
-                bug.Speed = 0f;
-                bug.SquashProgress += dt / SquashDuration;
-                break;
             case BugState.Wandering:
                 UpdateWandering(bug, dt);
                 break;
             case BugState.Pausing:
                 UpdatePausing(bug);
                 break;
+            case BugState.Fleeing:
+                UpdateFleeing(bug, dt, cursor);
+                break;
+        }
+    }
+
+    /// <summary>Common cursor reaction (spec 5.3): arm a delay when the cursor comes close, cancel if it leaves, flee when it expires.</summary>
+    private void UpdateReaction(Bug bug, Vector2? cursor)
+    {
+        bool cursorNear = cursor is { } c && Vector2.Distance(c, bug.Position) <= bug.Species.FleeRadius;
+        if (!cursorNear)
+        {
+            bug.ReactionTimer = null;
+            return;
+        }
+
+        if (bug.State == BugState.Fleeing)
+        {
+            return;
+        }
+
+        bug.ReactionTimer ??= rng.NextFloat(bug.Species.ReactionDelayMin, bug.Species.ReactionDelayMax);
+        if (bug.ReactionTimer <= 0f)
+        {
+            EnterState(bug, BugState.Fleeing);
+        }
+    }
+
+    private void UpdateFleeing(Bug bug, float dt, Vector2? cursor)
+    {
+        bug.Speed = bug.Species.FleeSpeed * bug.SpeedFactor;
+
+        if (bug.FleeJitterTimer <= 0f)
+        {
+            bug.FleeJitter = rng.NextFloat(-FleeJitterMax, FleeJitterMax);
+            bug.FleeJitterTimer = FleeJitterInterval;
+        }
+
+        bool cursorFar = cursor is not { } c
+            || Vector2.Distance(c, bug.Position) > FleeSafeDistanceFactor * bug.Species.FleeRadius;
+        bug.FleeSafeTime = cursorFar ? bug.FleeSafeTime + dt : 0f;
+
+        if (bug.FleeSafeTime >= FleeSafeDuration)
+        {
+            bug.PauseDuration = rng.NextFloat(0.3f, 1.0f);
+            EnterState(bug, BugState.Pausing);
         }
     }
 
@@ -220,8 +276,27 @@ public sealed class BugSimulation(Bounds bounds, IRandomSource rng)
         bug.LegPhase = (bug.LegPhase + Vector2.Distance(before, bug.Position) / stride) % 1f;
     }
 
-    /// <summary>Where the bug wants to go before edge steering. Fleeing is added in Task 8.</summary>
-    private Vector2 DesiredDirection(Bug bug, Vector2? cursor) => Direction(bug.TargetHeading);
+    /// <summary>Where the bug wants to go before edge steering (spec 5.3).</summary>
+    private static Vector2 DesiredDirection(Bug bug, Vector2? cursor)
+    {
+        if (bug.State != BugState.Fleeing)
+        {
+            return Direction(bug.TargetHeading);
+        }
+
+        if (cursor is not { } c)
+        {
+            return Direction(bug.Heading);
+        }
+
+        Vector2 away = bug.Position - c;
+        if (away.Length() < MinFleeDistance)
+        {
+            return Direction(bug.Heading);
+        }
+
+        return Direction(MathF.Atan2(away.Y, away.X) + bug.FleeJitter);
+    }
 
     /// <summary>Edge repulsion (spec 5.4): signed distance to each edge; anything closer than the margin, including negative (outside), pushes inward.</summary>
     private Vector2 EdgeRepulsion(Vector2 position)
@@ -291,6 +366,11 @@ public sealed class BugSimulation(Bounds bounds, IRandomSource rng)
                 break;
             case BugState.Pausing:
                 bug.Speed = 0f;
+                break;
+            case BugState.Fleeing:
+                bug.ReactionTimer = null;
+                bug.FleeSafeTime = 0f;
+                bug.FleeJitterTimer = 0f;
                 break;
             case BugState.Squashed:
                 bug.Speed = 0f;
