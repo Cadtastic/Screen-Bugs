@@ -25,6 +25,8 @@
 - `dotnet new wpf -n ScreenBugs -o src/ScreenBugs` (no `-f` flag) produces `App.xaml`, `App.xaml.cs`, `AssemblyInfo.cs`, `MainWindow.xaml`, `MainWindow.xaml.cs`, and a `net10.0-windows` csproj.
 - A csproj with both `UseWPF` and `UseWindowsForms` builds cleanly when the WinForms implicit usings are removed with `<Using Remove="System.Drawing" />` and `<Using Remove="System.Windows.Forms" />`.
 - The complete Core and test code in Chunks 1 and 2 (the state after Task 9) was compiled and run on this machine: 0 compiler warnings, all 37 tests pass, and the seed-sensitive tests (edge steering, flee sequence, respawn, straggler) also pass for seeds 1 through 40. If a test in those chunks fails for you, compare your file against the plan text before changing the simulation rules.
+- Every app file in Chunks 3, 4 and 5 was also compiled together on this machine (all nine painters, the splat, the overlay, the Win32 interop, the tray icon and the composition): 0 warnings, 0 errors, including XAML compilation of `App.xaml` and `OverlayWindow.xaml`.
+- The finished app was then run for 14 seconds in Release. It started clean with no crash log, drew bugs over the desktop, the foreground window and the taskbar, and exited on request. So the click-through overlay, the Win32 style calls, the frame loop, the painters and the tray registration are all known to work as written; what remains for Task 16 and Task 27 is the interactive behavior a screenshot cannot show (pass-through clicks, fleeing, squashing, focus, the tray menu, and CPU cost).
 
 ---
 
@@ -3734,7 +3736,11 @@ Chunk 4 is complete when all nine species render and squashing leaves a fading s
 
 Create `src/ScreenBugs/Diagnostics/CrashLog.cs` (spec 9). It must never throw, because it runs inside the unhandled-exception handler.
 
+The explicit `using System.IO;` is required: the Windows Desktop SDK's implicit usings for a WPF project cover `System`, `System.Collections.Generic`, `System.Linq`, `System.Threading` and `System.Threading.Tasks`, but **not** `System.IO`, so `Path`, `Directory` and `File` do not resolve without it.
+
 ```csharp
+using System.IO;
+
 namespace ScreenBugs.Diagnostics;
 
 /// <summary>Appends unhandled exceptions to %LocalAppData%\ScreenBugs\error.log.</summary>
@@ -3825,22 +3831,28 @@ These two files are the only ones that use `System.Drawing` and `System.Windows.
 
 - [ ] **Step 1: Write TrayIconFactory**
 
-Create `src/ScreenBugs/Tray/TrayIconFactory.cs` (spec 8: a 32x32 black ant drawn in code). The icon handle from `GetHicon` lives for the process lifetime; that single handle is intentionally not destroyed.
+Create `src/ScreenBugs/Tray/TrayIconFactory.cs` (spec 8: a 32x32 ant drawn in code). The icon handle from `GetHicon` lives for the process lifetime; that single handle is intentionally not destroyed.
+
+The glyph color follows the taskbar theme. The spec called for a black ant, but Windows 11's taskbar is dark by default, where black is invisible; a near-black ant is used on a light taskbar and a near-white one on a dark taskbar. The theme is read once at startup, so a user who switches theme afterwards sees the old glyph until the next launch.
 
 ```csharp
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using Microsoft.Win32;
 
 namespace ScreenBugs.Tray;
 
-/// <summary>Draws the tray glyph (a black ant seen from above) so no icon asset is needed.</summary>
+/// <summary>Draws the tray glyph (an ant seen from above) so no icon asset is needed.</summary>
 public static class TrayIconFactory
 {
     public static Icon Create()
     {
+        Color glyph = TaskbarIsLight() ? Color.FromArgb(28, 28, 28) : Color.FromArgb(240, 240, 240);
+
         using var bitmap = new Bitmap(32, 32);
         using (var graphics = Graphics.FromImage(bitmap))
-        using (var pen = new Pen(Color.Black, 2f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+        using (var pen = new Pen(glyph, 2f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+        using (var brush = new SolidBrush(glyph))
         {
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
             graphics.Clear(Color.Transparent);
@@ -3854,19 +3866,36 @@ public static class TrayIconFactory
             graphics.DrawLine(pen, 14, 5, 10, 1);
             graphics.DrawLine(pen, 18, 5, 22, 1);
 
-            graphics.FillEllipse(Brushes.Black, 11, 3, 10, 9);
-            graphics.FillEllipse(Brushes.Black, 12, 11, 8, 9);
-            graphics.FillEllipse(Brushes.Black, 10, 19, 12, 12);
+            graphics.FillEllipse(brush, 11, 3, 10, 9);
+            graphics.FillEllipse(brush, 12, 11, 8, 9);
+            graphics.FillEllipse(brush, 10, 19, 12, 12);
         }
 
         return Icon.FromHandle(bitmap.GetHicon());
+    }
+
+    /// <summary>True when the taskbar uses the light theme. Windows 11 defaults to dark, so that is the fallback.</summary>
+    private static bool TaskbarIsLight()
+    {
+        try
+        {
+            object? value = Registry.GetValue(
+                @"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+                "SystemUsesLightTheme",
+                null);
+            return value is int light && light != 0;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 }
 ```
 
 - [ ] **Step 2: Write TrayIcon**
 
-Create `src/ScreenBugs/Tray/TrayIcon.cs` (spec 8). The explicit constructor is the allowed exception to the primary-constructor rule: it wires WinForms components and event handlers that need `this`.
+Create `src/ScreenBugs/Tray/TrayIcon.cs` (spec 8). The explicit constructor is the allowed exception to the primary-constructor rule: it wires WinForms components and event handlers that need `this`. Inside this file `Application` means the WinForms one, which is why the `ThreadException` plumbing lives here rather than in `App`.
 
 ```csharp
 using System.Windows.Forms;
@@ -3879,6 +3908,7 @@ public sealed class TrayIcon : IDisposable
     private static readonly int[] CountChoices = [1, 3, 5, 10];
 
     private readonly NotifyIcon notifyIcon;
+    private readonly ContextMenuStrip menu;
     private readonly ToolStripMenuItem pauseItem;
     private readonly ToolStripMenuItem[] countItems;
 
@@ -3906,11 +3936,13 @@ public sealed class TrayIcon : IDisposable
         var exitItem = new ToolStripMenuItem("Exit");
         exitItem.Click += (_, _) => ExitRequested?.Invoke();
 
-        var menu = new ContextMenuStrip();
+        menu = new ContextMenuStrip();
         menu.Items.Add(pauseItem);
         menu.Items.Add(bugsMenu);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(exitItem);
+        menu.Opening += (_, _) => IsMenuOpen = true;
+        menu.Closed += (_, _) => IsMenuOpen = false;
 
         notifyIcon = new NotifyIcon
         {
@@ -3921,6 +3953,24 @@ public sealed class TrayIcon : IDisposable
         };
     }
 
+    /// <summary>
+    /// Routes exceptions thrown inside menu handlers to <paramref name="handler"/>.
+    /// Menu clicks run inside a WinForms window procedure, which catches exceptions and raises
+    /// them on <c>Application.ThreadException</c> instead of letting them reach WPF's
+    /// <c>DispatcherUnhandledException</c>. Without this, a failing menu handler shows the
+    /// WinForms error dialog and its Quit button calls <c>Environment.Exit</c>, skipping
+    /// <c>App.OnExit</c> and leaving a ghost tray icon. Call this before creating a
+    /// <see cref="TrayIcon"/>.
+    /// </summary>
+    public static void RouteThreadExceptions(Action<Exception> handler) =>
+        Application.ThreadException += (_, args) => handler(args.Exception);
+
+    /// <summary>
+    /// True while the context menu is on screen. The overlay stays click-through in that case,
+    /// so a bug drawn over the menu cannot swallow a click meant for a menu item.
+    /// </summary>
+    public bool IsMenuOpen { get; private set; }
+
     /// <summary>Swaps the first menu item between "Pause" and "Resume".</summary>
     public void SetPaused(bool paused) => pauseItem.Text = paused ? "Resume" : "Pause";
 
@@ -3928,6 +3978,7 @@ public sealed class TrayIcon : IDisposable
     {
         notifyIcon.Visible = false;
         notifyIcon.Dispose();
+        menu.Dispose();
     }
 
     private void SelectCount(ToolStripMenuItem selected)
@@ -3961,7 +4012,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Replace App.xaml.cs**
 
-Overwrite `src/ScreenBugs/App.xaml.cs` (spec 9). Pause hides the overlay and stops both timers; Resume reverses it. Hiding and re-showing a WPF window keeps its native handle, so the extended styles set in `OnSourceInitialized` survive.
+Overwrite `src/ScreenBugs/App.xaml.cs` (spec 9). Pause hides the overlay and stops both timers; Resume reverses it. Hiding and re-showing a WPF window keeps its native handle, so the extended styles set in `OnSourceInitialized` survive. Both failure paths funnel into `HandleFatalException`: WPF's own dispatcher exceptions, and exceptions from tray-menu handlers, which WinForms reports on `Application.ThreadException` instead (see `TrayIcon.RouteThreadExceptions`). `RouteThreadExceptions` is called before the first tray window exists, because WinForms decides how to treat handler exceptions when its first window callback runs.
 
 ```csharp
 using System.Windows;
@@ -3987,6 +4038,7 @@ public partial class App : Application
     {
         base.OnStartup(e);
         DispatcherUnhandledException += OnDispatcherUnhandledException;
+        TrayIcon.RouteThreadExceptions(HandleFatalException);
 
         instanceGuard = new SingleInstanceGuard();
         if (!instanceGuard.TryAcquire())
@@ -4009,7 +4061,8 @@ public partial class App : Application
         {
             Vector2? cursor = CursorTracker.GetCursorDips(window);
             simulation.Step(dt, cursor);
-            clickThrough.Update(cursor is { } c && simulation.HitTest(c) is not null);
+            bool squashable = trayIcon?.IsMenuOpen != true && cursor is { } c && simulation.HitTest(c) is not null;
+            clickThrough.Update(squashable);
             window.Surface.Redraw();
         });
 
@@ -4047,10 +4100,21 @@ public partial class App : Application
         }
     }
 
-    private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+    private void OnDispatcherUnhandledException(object? sender, DispatcherUnhandledExceptionEventArgs e)
     {
-        CrashLog.Write(e.Exception);
         e.Handled = true;
+        HandleFatalException(e.Exception);
+    }
+
+    /// <summary>Logs the exception, tears everything down, and exits. Shared by the WPF dispatcher and WinForms tray paths.</summary>
+    private void HandleFatalException(Exception exception)
+    {
+        CrashLog.Write(exception);
+
+        // Stop the loop before the posted Shutdown runs, so a failing tick cannot log again.
+        frameLoop?.Stop();
+        topmostKeeper?.Stop();
+        overlay?.Hide();
         trayIcon?.Dispose();
         trayIcon = null;
         Shutdown();
@@ -4067,18 +4131,32 @@ Expected: `Build succeeded.` with 0 warnings from `App.xaml.cs`.
 
 Run: `dotnet run --project src/ScreenBugs -c Release`, then confirm each item. Record any that fail and fix before committing.
 
-1. Launch: a tray icon with a black ant appears; within a few seconds three bugs walk in from the edges over the desktop.
+1. Launch: within a few seconds three bugs walk in from the edges over the desktop. The tray icon is an ant, but Windows 11 puts a newly registered icon in the hidden-icons overflow, so click the `^` chevron on the taskbar to find it; drag it onto the taskbar if you want it permanently visible. Do not treat a missing icon in the visible tray as a failure.
 2. Click and type in other apps: works everywhere except on a bug.
 3. Move the cursor toward a bug: it runs away after a brief hesitation; a quick decisive click still squashes it.
 4. Squash: a splat in the bug's color fades over about 1.5 s; a replacement walks in 3 to 8 s later.
 5. Alt-Tab shows no Screen Bugs entry; after a squash, the app you were using still has focus (type a character to confirm).
-6. Tray menu: Pause hides all bugs and the item reads Resume; Resume brings them back moving; Bugs 10 adds bugs from the edges; Bugs 1 leaves a single bug; Exit removes the tray icon and the process ends (check Task Manager).
-7. Launch a second copy while the first runs (`dotnet run --project src/ScreenBugs -c Release` in another terminal): it exits immediately and no second tray icon appears.
+6. Tray menu (right-click the icon, in the overflow flyout unless you dragged it out): the glyph is clearly visible against its background; Pause hides all bugs and the item reads Resume; Resume brings them back moving; Bugs 10 adds bugs from the edges; Bugs 1 leaves a single bug; Exit removes the tray icon and the process ends (check Task Manager). With Bugs at 10, open the menu and wait for a bug to walk across it, then click a menu item under that bug: the menu item still activates and the bug is not squashed.
+7. Launch a second copy while the first runs, by starting the built binary directly rather than through `dotnet run`, which would try to rebuild over the locked files:
+
+   ```bash
+   ./src/ScreenBugs/bin/Release/net10.0-windows/ScreenBugs.exe
+   ```
+
+   Expected: it exits immediately, no second tray icon appears, and the first copy keeps running.
 8. With Bugs set to 10, CPU in Task Manager stays in the range measured in Task 16.
 
-- [ ] **Step 4: Confirm the crash log path works**
+- [ ] **Step 4: Confirm both crash paths write the log**
 
-Temporarily add `throw new InvalidOperationException("crash test");` as the first line of `TogglePause`, run, click Pause. Expected: the app exits without a Windows error dialog and `%LocalAppData%\ScreenBugs\error.log` contains the exception with a timestamp. Remove the line and rebuild.
+Test the WinForms tray path first, because it is the one that only works if `RouteThreadExceptions` is wired correctly. Temporarily add `throw new InvalidOperationException("tray crash test");` as the first line of `TogglePause`, run, and click Pause.
+
+Expected: the app exits, the tray icon disappears, no WinForms "Continue / Quit" dialog appears, and `%LocalAppData%\ScreenBugs\error.log` ends with a timestamped `InvalidOperationException: tray crash test`. If you get the Continue/Quit dialog instead, `TrayIcon.RouteThreadExceptions` was not called before the tray icon was created.
+
+Then test the WPF dispatcher path: remove that line, and instead throw from inside the `FrameLoop` lambda in `OnStartup` (the first statement of the lambda). Run again.
+
+Expected: the app exits immediately with a second entry appended to the same log, and only one entry for this run (the loop is stopped before shutdown, so the tick cannot fire again).
+
+Remove both throws and rebuild before continuing.
 
 - [ ] **Step 5: Run the unit tests one last time**
 
@@ -4088,7 +4166,7 @@ Expected: `Passed!` with 0 failures.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/ScreenBugs/App.xaml.cs
+git add src/ScreenBugs
 git commit -m "feat(app): tray-driven composition with pause, count, exit, single instance and crash log
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"

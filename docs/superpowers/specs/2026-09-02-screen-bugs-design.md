@@ -456,13 +456,25 @@ canvas.Redraw()
 ## 8. Tray (`ScreenBugs/Tray`)
 
 `TrayIcon` wraps a `System.Windows.Forms.NotifyIcon`:
-- Icon from `TrayIconFactory.Create()`, which draws a 32x32 black ant silhouette
-  with `System.Drawing` and converts it to an `Icon`. No icon asset file.
+- Icon from `TrayIconFactory.Create()`, which draws a 32x32 ant silhouette with
+  `System.Drawing` and converts it to an `Icon`. No icon asset file. The glyph is
+  near-black on a light taskbar and near-white on a dark one, read once from the
+  `SystemUsesLightTheme` user setting and defaulting to the dark taskbar that
+  Windows 11 ships with.
 - Context menu: `Pause` (text becomes `Resume` while paused), `Bugs` submenu with
-  radio-checked items `1`, `3`, `5`, `10`, a separator, and `Exit`.
+  mutually exclusive checked items `1`, `3`, `5`, `10`, a separator, and `Exit`.
 - Events: `PauseToggled`, `BugCountChanged(int)`, `ExitRequested`.
-- `IDisposable`: sets `Visible = false` and disposes the `NotifyIcon` so no ghost
-  icon remains.
+- `IsMenuOpen` is true while the context menu is displayed. The overlay stays
+  click-through then, so a bug drawn over the menu cannot swallow a click meant
+  for a menu item.
+- `RouteThreadExceptions(Action<Exception>)` forwards WinForms
+  `Application.ThreadException` to the app's fatal handler. Menu clicks run
+  inside a WinForms window procedure, which catches exceptions and raises them
+  there rather than on WPF's `DispatcherUnhandledException`; without this a
+  failing menu handler shows the WinForms error dialog, whose Quit button skips
+  `OnExit` and leaves a ghost tray icon.
+- `IDisposable`: sets `Visible = false` and disposes the `NotifyIcon` and its
+  menu so no ghost icon remains.
 
 ## 9. Application composition (`App`)
 
@@ -478,10 +490,13 @@ canvas.Redraw()
      `simulation.TargetCount`; wire `ExitRequested` to `Shutdown()`.
   5. Start the frame loop and topmost keeper.
 - `OnExit` disposes the tray icon and releases the mutex.
-- `DispatcherUnhandledException`: `CrashLog.Write(exception)` appends to
-  `%LocalAppData%\ScreenBugs\error.log`, the tray icon is disposed, and the app
-  shuts down. The handler marks the exception handled so WPF does not show its
-  own dialog.
+- Fatal errors: one handler appends the exception to
+  `%LocalAppData%\ScreenBugs\error.log`, stops the frame loop and topmost timer,
+  hides the overlay, disposes the tray icon, and shuts down. Two sources feed it:
+  WPF's `DispatcherUnhandledException` (marked handled so WPF shows no dialog),
+  and WinForms' `Application.ThreadException` for exceptions thrown inside
+  tray-menu handlers, wired through `TrayIcon.RouteThreadExceptions` before the
+  tray icon is created.
 
 ## 10. Testing
 
@@ -524,14 +539,16 @@ the random walk to reach a state.
 Manual checklist for the WPF layer (documented in the plan, run before calling
 the work done):
 
-1. Launch: bugs walk in from the edges over a normal desktop.
+1. Launch: bugs walk in from the edges over a normal desktop. The tray icon
+   starts in the Windows 11 hidden-icons overflow, behind the taskbar chevron.
 2. Clicking and typing in other apps works everywhere except on a bug.
 3. Moving the cursor toward a bug makes it run; a quick click still squashes it.
 4. A squashed bug leaves a fading splat and a replacement appears later.
 5. Alt-Tab shows no Screen Bugs entry; the foreground app keeps focus after a
    squash.
-6. Tray: Pause hides the bugs and Resume brings them back; the count menu adds
-   and removes bugs; Exit removes the tray icon.
+6. Tray: the icon is visible against the taskbar; Pause hides the bugs and
+   Resume brings them back; the count menu adds and removes bugs; a menu item
+   with a bug walking over it still activates; Exit removes the tray icon.
 7. Launching a second copy does nothing.
 8. Task Manager shows modest CPU with 10 bugs at 60 fps.
 
