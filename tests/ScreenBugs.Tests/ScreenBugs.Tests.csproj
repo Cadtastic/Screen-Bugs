@@ -17,6 +17,7 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <Using Include="System.Numerics" />
+    <Using Include="ScreenBugs.Core.Simulation" />
   </ItemGroup>
 
   <ItemGroup>
