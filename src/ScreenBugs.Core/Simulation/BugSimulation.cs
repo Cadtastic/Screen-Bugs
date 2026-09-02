@@ -18,12 +18,17 @@ public sealed class BugSimulation(Bounds bounds, IRandomSource rng)
     private const float FleeJitterInterval = 0.3f;
     private const float FleeJitterMax = 20f * MathF.PI / 180f;
     private const float MinFleeDistance = 0.01f;
+    private const float StragglerTimeout = 10f;
 
     private readonly List<Bug> bugs = [];
     private int nextId;
     private int targetCount;
+    private float? respawnTimer;
 
     public IReadOnlyList<Bug> Bugs => bugs;
+
+    /// <summary>Seconds until the next respawn, or null when no respawn is pending. Exposed for tests.</summary>
+    internal float? RespawnTimer => respawnTimer;
 
     /// <summary>How many alive bugs the simulation maintains (spec 5.6). Setting it spawns or removes bugs immediately.</summary>
     public int TargetCount
@@ -32,6 +37,7 @@ public sealed class BugSimulation(Bounds bounds, IRandomSource rng)
         set
         {
             targetCount = value;
+            respawnTimer = null;
             while (AliveCount < targetCount)
             {
                 SpawnFromEdge();
@@ -111,7 +117,35 @@ public sealed class BugSimulation(Bounds bounds, IRandomSource rng)
             Move(bug, dt, cursor);
         }
 
-        bugs.RemoveAll(b => b.SquashProgress >= 1f);
+        bugs.RemoveAll(b => b.SquashProgress >= 1f || (!b.HasEnteredScreen && b.Age >= StragglerTimeout));
+        Respawn(dt);
+    }
+
+    /// <summary>Respawn (spec 5.5): one pending timer of 3 to 8 s whenever the population is short; spawn only if still short when it expires.</summary>
+    private void Respawn(float dt)
+    {
+        if (respawnTimer is { } remaining)
+        {
+            remaining -= dt;
+            if (remaining > 0f)
+            {
+                respawnTimer = remaining;
+                return;
+            }
+
+            respawnTimer = null;
+            if (AliveCount < targetCount)
+            {
+                SpawnFromEdge();
+            }
+
+            return;
+        }
+
+        if (AliveCount < targetCount)
+        {
+            respawnTimer = rng.NextFloat(3f, 8f);
+        }
     }
 
     private static void AdvanceTimers(Bug bug, float dt)
