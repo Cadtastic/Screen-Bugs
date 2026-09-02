@@ -69,6 +69,7 @@ ScreenSavers/                                  repo root
       SplatPainter.cs
       Painters/
         HissingCockroachPainter.cs
+        AntGeometry.cs                         shared by both ant painters
         BlackGardenAntPainter.cs
         RedFireAntPainter.cs
         PrayingMantisPainter.cs
@@ -174,6 +175,10 @@ Values for v1:
 - `float SpeedFactor` in [0.85, 1.15], drawn from `Seed`, multiplies both speeds.
 - `float ReactionTimer`, `float FleeSafeTime` (seconds the cursor has been far
   away while fleeing), `float SquashProgress` in [0, 1].
+- `float RetargetTimer` (seconds until the next wander retarget),
+  `float PauseDuration` (the drawn length of the current pause),
+  `float FleeJitter` (radians) and `float FleeJitterTimer` (seconds until the
+  jitter is redrawn), `float Age` (seconds since spawn).
 - `bool HasEnteredScreen`: set true the first time `Bounds.Contains(Position)`
   holds; the edge clamp (5.4) applies only after that.
 - `bool IsAlive => State != BugState.Squashed`.
@@ -187,7 +192,16 @@ Values for v1:
 - `Bug? HitTest(Vector2 point)` returns the nearest alive bug whose hit disc
   contains the point, or null.
 - `bool TrySquashAt(Vector2 point)`.
+- `Bug AddBug(BugSpecies species, Vector2 position, float heading)` places a
+  wandering bug at an exact position. It exists so tests can arrange scenarios;
+  the app never calls it.
 - Constructor spawns `targetCount` bugs immediately (see 5.5).
+
+Test access: `Bug`'s mutable properties have `internal` setters and
+`ScreenBugs.Core` declares `InternalsVisibleTo("ScreenBugs.Tests")`, so tests
+can force a state (for example `Pausing`) without waiting for the random walk
+to produce it. `BugSimulation` exposes `internal float RespawnTimer` for the
+same reason.
 
 ### 5.2 Step order
 
@@ -209,7 +223,8 @@ cursor leaves the radius before the timer expires, the timer is cancelled.
 `Wandering`
 - Every 1 to 4 s (drawn per event), set `TargetHeading = Heading + U(-90, +90)
   degrees`.
-- Each step, add heading noise `U(-0.3, 0.3) * dt` radians.
+- Each step, add heading noise `U(-0.3, 0.3) * dt` radians directly to
+  `Heading`.
 - Turn toward `TargetHeading` (plus edge steering, 5.4) at `TurnRate`.
 - `Speed = WalkSpeed * SpeedFactor`.
 - With probability `PauseChancePerSecond * dt`, enter `Pausing` with a duration
@@ -220,9 +235,10 @@ cursor leaves the radius before the timer expires, the timer is cancelled.
   and immediately pick a new `TargetHeading`.
 
 `Fleeing`
-- Desired direction = normalize(Position - cursor), rotated by a jitter of
-  `U(-20, +20)` degrees redrawn every 0.3 s so the path is not perfectly
-  predictable, plus edge steering.
+- Desired direction = normalize(Position - cursor), rotated by `FleeJitter`,
+  a `U(-20, +20)` degree angle redrawn every 0.3 s so the path is not perfectly
+  predictable, plus edge steering. When `cursor` is null the bug keeps its
+  current heading (plus edge steering).
 - Turn toward it at `2 * TurnRate`; `Speed = FleeSpeed * SpeedFactor`.
 - If the cursor is null or farther than `1.5 * FleeRadius`, accumulate
   `FleeSafeTime`; otherwise reset it to 0. When `FleeSafeTime >= 0.8 s`, enter
@@ -233,10 +249,13 @@ cursor leaves the radius before the timer expires, the timer is cancelled.
 
 ### 5.4 Movement and edges
 
-- Edge steering: with margin `M = 60` DIPs, for each screen edge closer than `M`,
-  add `(1 - d / M)` times that edge's inward normal to a repulsion vector `r`.
-  If `r` is non-zero, the effective target direction is
-  `normalize(desiredDir + 2 * r)`. This applies to both wandering and fleeing.
+- Edge steering: with margin `M = 60` DIPs, let `d` be the signed distance from
+  the bug to each screen edge (positive inside, negative outside). For each edge
+  with `d < M`, add `(1 - d / M)` times that edge's inward normal to a repulsion
+  vector `r`; outside the screen `d` is negative, so the inward push keeps
+  growing the farther out a bug is. If `r` is non-zero, the effective target
+  direction is `normalize(desiredDir + 2 * r)`. This applies to both wandering
+  and fleeing.
 - Turning: rotate `Heading` toward the effective target by at most
   `turnRate * dt` per step, taking the shorter way around.
 - Move: `Position += (cos Heading, sin Heading) * Speed * dt`.
@@ -252,16 +271,19 @@ cursor leaves the radius before the timer expires, the timer is cancelled.
   edge; set `Heading` to the inward normal plus `U(-30, +30)` degrees; species is
   chosen uniformly from `SpeciesCatalog.All`; `Seed` is `rng.NextInt(int.MaxValue)`.
   `HasEnteredScreen` starts false, so the bug can walk in from outside.
+- Stragglers: a bug that has not entered the screen within 10 s of spawning
+  (`Age >= 10` while `HasEnteredScreen` is false) is removed. The respawn rule
+  below then replaces it.
 - Initial population: the constructor calls `SpawnFromEdge()` `targetCount`
   times.
 - Respawn: whenever `aliveCount < TargetCount` and no respawn timer is running,
-  start one with `U(3, 8)` s. When it expires, spawn one bug and clear the timer.
-  Because the check runs every step, several deaths queue up one respawn at a
-  time, each 3 to 8 s apart.
+  start one with `U(3, 8)` s. When it expires, clear the timer and spawn one bug
+  only if `aliveCount < TargetCount` still holds. Because the check runs every
+  step, several deaths queue up one respawn at a time, each 3 to 8 s apart.
 
 ### 5.6 Changing the target count
 
-Setting `TargetCount`:
+Setting `TargetCount` cancels any running respawn timer, then:
 - Increase: call `SpawnFromEdge()` for each missing bug immediately.
 - Decrease: remove surplus alive bugs, newest `Id` first, until
   `aliveCount == TargetCount`. Squashed bugs are left to finish fading.
@@ -273,30 +295,38 @@ Squashed`, `SquashProgress = 0`, `Speed = 0`, return true; otherwise false.
 
 ## 6. Rendering (`ScreenBugs/Rendering`)
 
-`IBugPainter { void Paint(DrawingContext dc, Bug bug); }` draws one bug in
-bug-local space (section 4). One implementation per species, registered in
-`BugPainterRegistry` which maps `SpeciesId` to a painter instance.
+`IBugPainter` has two members: `void Paint(DrawingContext dc, Bug bug)` draws
+one bug in bug-local space (section 4), and `Color BodyColor { get; }` is the
+species' main body color, used by `SplatPainter`. One implementation per
+species, registered in `BugPainterRegistry` which maps `SpeciesId` to a painter
+instance. The two ant painters share one `AntGeometry` helper (in
+`Rendering/Painters/AntGeometry.cs`) and differ only in color, mirroring the
+single `<symbol>` the specimen sheet uses for both.
 
 Shared helpers:
 
 - `LegPainter.DrawLeg(dc, pen, hip, knee, foot, swingRadians)` draws a two-segment
   leg (hip to knee to foot) rotated about the hip by `swingRadians`.
-- Gait: `swing = amplitude * sin(2 * PI * (bug.LegPhase + groupOffset))`.
-  - Six legs: tripod gait. Legs are indexed front to back on each side; left 1,
-    left 3, and right 2 use `groupOffset = 0`, the others use `0.5`. Because the
-    right side is mirrored, applying the same signed swing to both sides
-    naturally moves them in opposite directions.
-  - Four legs (mantis): front pair offset 0, rear pair 0.5. The raptorial
-    forelegs are static and drawn folded.
-  - Eight legs (spider): legs 1 and 3 offset 0, legs 2 and 4 offset 0.5.
-  - Centipede: 10 body segments with a leg pair each; pair `i` uses
-    `groupOffset = 0.1 * i`, producing a metachronal wave down the body.
-  - Amplitude is 6 to 10 degrees depending on species (ants 9, cockroach 8,
-    others 7, centipede 10).
+- Gait: `swing = amplitude * sin(2 * PI * (bug.LegPhase + groupOffset))`, with
+  the same signed `swing` applied to the left and right leg of a pair. Because
+  the right leg's geometry is mirrored, one signed rotation moves the left foot
+  forward and the right foot backward, so a pair is always in antiphase and
+  `groupOffset` is assigned per pair, exactly as in the specimen sheet.
+  - Six legs (tripod gait): pairs 1 and 3 use `groupOffset = 0`, pair 2 uses
+    `0.5`.
+  - Four legs (mantis): front pair 0, rear pair 0.5. The raptorial forelegs are
+    static and drawn folded.
+  - Eight legs (spider): pairs 1 and 3 offset 0, pairs 2 and 4 offset 0.5.
+  - Centipede: 10 body segments; the first 9 carry an animated leg pair with
+    `groupOffset = 0.1 * i` (`i` from 0 to 8), producing a metachronal wave down
+    the body; the terminal pair is longer and static.
+  - Amplitude in degrees: ants 9, cockroach 8, centipede 10, mantis 6, all
+    others 7.
 - Body bob: the body group is offset sideways by `1 DIP * sin(4 * PI * LegPhase)`
   so it sways with the steps.
 - Antennae waggle: rotate each antenna about its base by
-  `3 degrees * sin(2 * PI * LegPhase + side)`.
+  `3 degrees * sin(2 * PI * LegPhase + side)`, where `side` is 0 for the left
+  antenna and `PI` for the right.
 - Shadow: an ellipse under the body, black at 8 percent opacity, offset (2, 3).
 - Hit disc: a filled circle of `HitRadius` in `Color.FromArgb(1, 0, 0, 0)` drawn
   first for every alive bug. It is visually invisible but non-transparent to
@@ -306,8 +336,8 @@ Geometry for each species is ported from `assets/bug-specimens.svg`. Each
 specimen there is drawn at roughly 3x on-screen size; painters scale the
 specimen coordinates so the body spans `Species.BodyLength`.
 
-`SplatPainter.Paint(dc, bug)` renders a squashed bug: 6 to 9 overlapping circles
-in the species' darkened body color, offset randomly within `0.7 * BodyLength`
+`SplatPainter.Paint(dc, bug, Color bodyColor)` renders a squashed bug: 6 to 9
+overlapping circles in `bodyColor` darkened by 30 percent, offset randomly within `0.7 * BodyLength`
 of the center, plus 3 to 5 small droplet circles further out. All offsets come
 from a `Random(bug.Seed)` so the splat is stable across frames. The whole splat
 is drawn at opacity `1 - SquashProgress`.
@@ -316,7 +346,8 @@ is drawn at opacity `1 - SquashProgress`.
 - `BugSimulation? Simulation` property.
 - `OnRender` iterates `Simulation.Bugs`; for alive bugs it pushes a translate to
   `Position` and a rotate of `Heading + 90 degrees` then calls the species
-  painter; for squashed bugs it calls `SplatPainter` (translate only).
+  painter; for squashed bugs it calls `SplatPainter` (translate only), passing
+  the species painter's `BodyColor`.
 - `Redraw()` calls `InvalidateVisual()`; the frame loop calls it once per tick.
 
 ## 7. Overlay window (`ScreenBugs/Overlay`)
@@ -366,8 +397,10 @@ simulation.
 - `FrameLoop(Action<float> tick)`; `Start()` subscribes to
   `CompositionTarget.Rendering`, `Stop()` unsubscribes.
 - Uses `RenderingEventArgs.RenderingTime` to measure elapsed time; skips the
-  callback if less than 1/60 s has elapsed since the last accepted frame; passes
-  `dt` (seconds, capped at 0.1 by the simulation) to `tick`.
+  callback if less than `1/60 s - 1 ms` has elapsed since the last accepted
+  frame (the tolerance keeps 120 Hz and 144 Hz monitors at a steady 60 instead
+  of 48); passes the real `dt` (seconds, capped at 0.1 by the simulation) to
+  `tick`.
 - `Start()` after a `Stop()` resets the timestamp so the paused duration is not
   passed as `dt`.
 
@@ -426,23 +459,30 @@ canvas.Redraw()
 
 ## 10. Testing
 
-Unit tests (xUnit, `ScreenBugs.Tests`, seeded `SystemRandomSource(1234)`):
+Unit tests (xUnit, `ScreenBugs.Tests`, seeded `SystemRandomSource(1234)`).
+Tests arrange bugs with `AddBug` and the internal setters; they never rely on
+the random walk to reach a state.
 
 - Stays in bounds: 10 bugs, 20,000 steps of 1/60 s with no cursor; every alive
   bug that has entered the screen is inside the bounds inset by 2 DIPs.
 - Legs stop when paused: `LegPhase` does not change across a step where the bug
   is `Pausing`.
-- Flees the cursor: place a cursor 40 DIPs from a wandering bug; after 1 s of
-  steps the bug is `Fleeing` and its distance from the cursor has increased.
+- Flees the cursor: add a black garden ant heading right and place the cursor
+  40 DIPs behind it (to its left); after 2 s of steps the bug is `Fleeing` and
+  its distance from the cursor has increased.
 - Reaction delay: with the cursor close, the bug is not `Fleeing` before
   `ReactionDelayMin` has elapsed.
 - Flee ends: after the cursor moves away, the bug returns to `Pausing` then
   `Wandering` within 3 s.
 - Squash: `TrySquashAt` on a bug's position returns true, the bug is `Squashed`,
-  after 1.5 s of steps it is removed from `Bugs`, and `TrySquashAt` on empty
+  after 2 s of steps it is no longer in `Bugs`, and `TrySquashAt` on empty
   space returns false.
 - Respawn: after a squash the alive count returns to `TargetCount` within 8 s
   of steps, and the new bug spawns outside the bounds heading inward.
+- Respawn reconcile: with a respawn timer running, raising `TargetCount` cancels
+  it, and the alive count never exceeds `TargetCount` over the next 10 s.
+- Straggler: a bug added outside the bounds heading away is removed within 10 s
+  and replaced through the respawn rule.
 - Target count up and down: raising to 10 spawns 7 immediately; lowering to 1
   leaves exactly one alive bug and keeps any fading squashed bug.
 - Hit test: `HitTest` returns the nearest bug when two overlap and null when the
@@ -464,7 +504,19 @@ the work done):
 7. Launching a second copy does nothing.
 8. Task Manager shows modest CPU with 10 bugs at 60 fps.
 
-## 11. Future work (out of scope)
+## 11. Build order
+
+The biggest technical risk is the cost of redrawing a full-screen transparent
+WPF window every frame, so it is verified early:
+
+1. `ScreenBugs.Core` with its tests.
+2. Overlay window, frame loop, click-through, and a single painter (the black
+   garden ant), so click-through, squash, and CPU cost (checklist item 8) are
+   confirmed before the other painters are ported.
+3. The remaining eight painters and the splat.
+4. Tray icon and application composition.
+
+## 12. Future work (out of scope)
 
 Multi-monitor overlays, persisted settings, run at startup, squash sound,
 additional species, bug-to-bug interactions.
