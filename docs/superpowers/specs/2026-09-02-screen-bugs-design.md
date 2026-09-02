@@ -142,25 +142,26 @@ and `Clamp(Vector2, float inset)`.
 | `ReactionDelayMin`, `ReactionDelayMax` | seconds between cursor arriving and the flee starting |
 | `PauseChancePerSecond` | probability per second of dropping into a pause while wandering |
 | `PauseMin`, `PauseMax` | seconds a pause lasts |
-| `StrideLength` | DIPs traveled per full leg cycle |
-| `LegCount` | legs the painter animates: 4 (mantis walking legs), 6, 8, or 20 |
+| `StrideLength` | DIPs traveled per full leg cycle while walking |
 
 `SpeciesCatalog` (static): `IReadOnlyList<BugSpecies> All` and `Get(SpeciesId)`.
 Values for v1:
 
-| Species | Body | Hit | Walk | Flee | Turn | FleeR | React | Pause/s | Pause len | Legs |
-|---|---|---|---|---|---|---|---|---|---|---|
-| Hissing cockroach | 44 | 26 | 110 | 330 | 5.0 | 180 | 0.10 to 0.25 | 0.20 | 0.5 to 2.0 | 6 |
-| Black garden ant | 16 | 14 | 70 | 175 | 6.0 | 120 | 0.10 to 0.25 | 0.50 | 0.3 to 1.2 | 6 |
-| Red fire ant | 15 | 14 | 80 | 200 | 6.0 | 120 | 0.10 to 0.25 | 0.50 | 0.3 to 1.2 | 6 |
-| Praying mantis | 56 | 24 | 25 | 50 | 2.0 | 90 | 0.20 to 0.40 | 0.80 | 1.0 to 4.0 | 4 |
-| Seven-spot ladybug | 22 | 16 | 40 | 80 | 3.0 | 100 | 0.10 to 0.25 | 0.30 | 0.5 to 2.0 | 6 |
-| Stag beetle | 40 | 22 | 30 | 55 | 2.0 | 90 | 0.10 to 0.25 | 0.30 | 0.5 to 2.0 | 6 |
-| House spider | 34 | 24 | 90 | 270 | 8.0 | 150 | 0.05 to 0.15 | 1.00 | 0.8 to 3.0 | 8 |
-| Centipede | 50 | 22 | 60 | 150 | 3.0 | 130 | 0.10 to 0.25 | 0.15 | 0.5 to 2.0 | 20 |
-| Stink bug | 28 | 18 | 35 | 70 | 2.5 | 100 | 0.10 to 0.25 | 0.40 | 0.5 to 2.0 | 6 |
+| Species | Body | Hit | Walk | Flee | Turn | FleeR | React | Pause/s | Pause len |
+|---|---|---|---|---|---|---|---|---|---|
+| Hissing cockroach | 44 | 26 | 110 | 330 | 5.0 | 180 | 0.10 to 0.25 | 0.20 | 0.5 to 2.0 |
+| Black garden ant | 16 | 14 | 70 | 175 | 6.0 | 120 | 0.10 to 0.25 | 0.50 | 0.3 to 1.2 |
+| Red fire ant | 15 | 14 | 80 | 200 | 6.0 | 120 | 0.10 to 0.25 | 0.50 | 0.3 to 1.2 |
+| Praying mantis | 56 | 24 | 25 | 50 | 2.0 | 90 | 0.20 to 0.40 | 0.80 | 1.0 to 4.0 |
+| Seven-spot ladybug | 22 | 16 | 40 | 80 | 3.0 | 100 | 0.10 to 0.25 | 0.30 | 0.5 to 2.0 |
+| Stag beetle | 40 | 22 | 30 | 55 | 2.0 | 90 | 0.10 to 0.25 | 0.30 | 0.5 to 2.0 |
+| House spider | 34 | 24 | 90 | 270 | 8.0 | 150 | 0.05 to 0.15 | 1.00 | 0.8 to 3.0 |
+| Centipede | 50 | 22 | 60 | 150 | 3.0 | 130 | 0.10 to 0.25 | 0.15 | 0.5 to 2.0 |
+| Stink bug | 28 | 18 | 35 | 70 | 2.5 | 100 | 0.10 to 0.25 | 0.40 | 0.5 to 2.0 |
 
-`StrideLength` is `0.6 * BodyLength` for every species.
+`StrideLength` is `0.6 * BodyLength` for every species. While `Fleeing` the
+effective stride is `2 * StrideLength`, so running legs cycle at most about
+9 times per second and do not strobe at 60 fps.
 
 `BugState` (enum): `Wandering`, `Pausing`, `Fleeing`, `Squashed`.
 
@@ -209,7 +210,7 @@ For each `Step(dt, cursor)`:
 
 1. Clamp `dt` to at most 0.1 s.
 2. For every bug run the state logic (5.3), then movement (5.4).
-3. Remove bugs whose `SquashProgress >= 1`.
+3. Remove bugs whose `SquashProgress >= 1`, and stragglers (5.5).
 4. Run respawn logic (5.5).
 
 ### 5.3 State logic
@@ -237,8 +238,9 @@ cursor leaves the radius before the timer expires, the timer is cancelled.
 `Fleeing`
 - Desired direction = normalize(Position - cursor), rotated by `FleeJitter`,
   a `U(-20, +20)` degree angle redrawn every 0.3 s so the path is not perfectly
-  predictable, plus edge steering. When `cursor` is null the bug keeps its
-  current heading (plus edge steering).
+  predictable, plus edge steering. When `cursor` is null, or within 0.01 DIPs
+  of `Position` so the direction is undefined, the bug keeps its current
+  heading (plus edge steering).
 - Turn toward it at `2 * TurnRate`; `Speed = FleeSpeed * SpeedFactor`.
 - If the cursor is null or farther than `1.5 * FleeRadius`, accumulate
   `FleeSafeTime`; otherwise reset it to 0. When `FleeSafeTime >= 0.8 s`, enter
@@ -262,7 +264,8 @@ cursor leaves the radius before the timer expires, the timer is cancelled.
 - Hard clamp (only when `HasEnteredScreen`): `Position` is clamped inside the
   bounds inset by 2 DIPs. If the clamp moved the bug, set `TargetHeading`
   toward the screen center.
-- `LegPhase = (LegPhase + distanceMoved / StrideLength) mod 1`.
+- `LegPhase = (LegPhase + distanceMoved / stride) mod 1`, where `stride` is
+  `StrideLength` normally and `2 * StrideLength` while `Fleeing`.
 
 ### 5.5 Spawning and respawning
 
@@ -318,10 +321,11 @@ Shared helpers:
     static and drawn folded.
   - Eight legs (spider): pairs 1 and 3 offset 0, pairs 2 and 4 offset 0.5.
   - Centipede: 10 body segments; the first 9 carry an animated leg pair with
-    `groupOffset = 0.1 * i` (`i` from 0 to 8), producing a metachronal wave down
-    the body; the terminal pair is longer and static.
-  - Amplitude in degrees: ants 9, cockroach 8, centipede 10, mantis 6, all
-    others 7.
+    `groupOffset = 0.125 * i` (`i` from 0 to 8), producing a metachronal wave
+    down the body that matches the specimen sheet; the terminal pair is longer
+    and static.
+  - Amplitude in degrees: ants 9, cockroach 8, ladybug 8, centipede 10,
+    mantis 6, all others 7.
 - Body bob: the body group is offset sideways by `1 DIP * sin(4 * PI * LegPhase)`
   so it sways with the steps.
 - Antennae waggle: rotate each antenna about its base by
@@ -337,10 +341,13 @@ specimen there is drawn at roughly 3x on-screen size; painters scale the
 specimen coordinates so the body spans `Species.BodyLength`.
 
 `SplatPainter.Paint(dc, bug, Color bodyColor)` renders a squashed bug: 6 to 9
-overlapping circles in `bodyColor` darkened by 30 percent, offset randomly within `0.7 * BodyLength`
-of the center, plus 3 to 5 small droplet circles further out. All offsets come
-from a `Random(bug.Seed)` so the splat is stable across frames. The whole splat
-is drawn at opacity `1 - SquashProgress`.
+overlapping circles in `bodyColor` darkened by 30 percent, each with radius
+`U(0.15, 0.30) * BodyLength`, centered randomly within `0.35 * BodyLength` of
+the bug's position, plus 3 to 5 droplet circles of radius
+`U(0.04, 0.08) * BodyLength` placed `U(0.5, 0.9) * BodyLength` from the center
+at random angles. All random values come from a `Random(bug.Seed)` so the splat
+is stable across frames. The whole splat is drawn at opacity
+`1 - SquashProgress`.
 
 `BugCanvas : FrameworkElement`:
 - `BugSimulation? Simulation` property.
@@ -416,7 +423,10 @@ that become topmost later. Stopped while paused.
 the constants `GWL_EXSTYLE`, `WS_EX_TRANSPARENT`, `WS_EX_TOOLWINDOW`,
 `WS_EX_NOACTIVATE`, `HWND_TOPMOST`, `SWP_*`. All wrapped as `internal static`
 methods that throw `Win32Exception` on failure except `GetCursorPos`, which
-returns false.
+returns false. Because `SetWindowLongPtr` returns 0 both on failure and when the
+previous style value was 0, its wrapper clears the last error first
+(`SetLastError(0)`) and treats a 0 result as failure only when
+`Marshal.GetLastWin32Error()` is non-zero.
 
 ### 7.7 Per-frame tick
 
@@ -468,8 +478,9 @@ the random walk to reach a state.
 - Legs stop when paused: `LegPhase` does not change across a step where the bug
   is `Pausing`.
 - Flees the cursor: add a black garden ant heading right and place the cursor
-  40 DIPs behind it (to its left); after 2 s of steps the bug is `Fleeing` and
-  its distance from the cursor has increased.
+  40 DIPs behind it (to its left); after 0.5 s of steps (past the 0.25 s
+  maximum reaction delay, long before it reaches the 180 DIP safe distance) the
+  bug is `Fleeing` and its distance from the cursor has increased.
 - Reaction delay: with the cursor close, the bug is not `Fleeing` before
   `ReactionDelayMin` has elapsed.
 - Flee ends: after the cursor moves away, the bug returns to `Pausing` then
@@ -481,8 +492,11 @@ the random walk to reach a state.
   of steps, and the new bug spawns outside the bounds heading inward.
 - Respawn reconcile: with a respawn timer running, raising `TargetCount` cancels
   it, and the alive count never exceeds `TargetCount` over the next 10 s.
-- Straggler: a bug added outside the bounds heading away is removed within 10 s
-  and replaced through the respawn rule.
+- Straggler: construct with `targetCount: 0`, `AddBug` a bug 30 DIPs outside
+  the bounds, force `State = Pausing` with `PauseDuration = 100` so it never
+  moves, then set `TargetCount = 1`. After 10 s of steps the bug is gone from
+  `Bugs`, and within a further 8 s a new bug has been spawned by the respawn
+  rule.
 - Target count up and down: raising to 10 spawns 7 immediately; lowering to 1
   leaves exactly one alive bug and keeps any fading squashed bug.
 - Hit test: `HitTest` returns the nearest bug when two overlap and null when the
