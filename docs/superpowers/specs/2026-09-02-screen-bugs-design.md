@@ -25,6 +25,8 @@ Non-goals for v1 (candidates for later):
 - Persisted settings (count resets to 3 on each launch).
 - Run at Windows startup.
 - Sound effects.
+- Reacting to display resolution or DPI changes while running (window size and
+  simulation bounds are read once at startup).
 
 ## 2. Technology
 
@@ -160,8 +162,9 @@ Values for v1:
 | Stink bug | 28 | 18 | 35 | 70 | 2.5 | 100 | 0.10 to 0.25 | 0.40 | 0.5 to 2.0 |
 
 `StrideLength` is `0.6 * BodyLength` for every species. While `Fleeing` the
-effective stride is `2 * StrideLength`, so running legs cycle at most about
-9 times per second and do not strobe at 60 fps.
+effective stride is `2 * StrideLength`, so even the fastest runner (the red fire
+ant) cycles its legs at most about 13 times per second, roughly 5 frames per
+cycle at 60 fps, and does not strobe.
 
 `BugState` (enum): `Wandering`, `Pausing`, `Fleeing`, `Squashed`.
 
@@ -201,15 +204,17 @@ effective stride is `2 * StrideLength`, so running legs cycle at most about
 Test access: `Bug`'s mutable properties have `internal` setters and
 `ScreenBugs.Core` declares `InternalsVisibleTo("ScreenBugs.Tests")`, so tests
 can force a state (for example `Pausing`) without waiting for the random walk
-to produce it. `BugSimulation` exposes `internal float RespawnTimer` for the
-same reason.
+to produce it. `BugSimulation` exposes `internal float? RespawnTimer` for the
+same reason; `null` means no respawn timer is running.
 
 ### 5.2 Step order
 
 For each `Step(dt, cursor)`:
 
 1. Clamp `dt` to at most 0.1 s.
-2. For every bug run the state logic (5.3), then movement (5.4).
+2. For every bug advance its timers (`Age`, `StateTime`, `ReactionTimer`,
+   `RetargetTimer`, `FleeJitterTimer`, `FleeSafeTime`), then run the state
+   logic (5.3), then movement (5.4).
 3. Remove bugs whose `SquashProgress >= 1`, and stragglers (5.5).
 4. Run respawn logic (5.5).
 
@@ -232,8 +237,9 @@ cursor leaves the radius before the timer expires, the timer is cancelled.
   drawn from `[PauseMin, PauseMax]`.
 
 `Pausing`
-- `Speed = 0`. When `StateTime` reaches the drawn duration, return to `Wandering`
-  and immediately pick a new `TargetHeading`.
+- `Speed = 0` and `Heading` does not change (no turning, no edge steering), so
+  the bug is completely still. When `StateTime` reaches `PauseDuration`, return
+  to `Wandering` and immediately pick a new `TargetHeading`.
 
 `Fleeing`
 - Desired direction = normalize(Position - cursor), rotated by `FleeJitter`,
@@ -287,7 +293,8 @@ cursor leaves the radius before the timer expires, the timer is cancelled.
 ### 5.6 Changing the target count
 
 Setting `TargetCount` cancels any running respawn timer, then:
-- Increase: call `SpawnFromEdge()` for each missing bug immediately.
+- Increase: `while (aliveCount < TargetCount) SpawnFromEdge();` so the number
+  spawned depends on the live count, not on the previous target.
 - Decrease: remove surplus alive bugs, newest `Id` first, until
   `aliveCount == TargetCount`. Squashed bugs are left to finish fading.
 
@@ -331,14 +338,16 @@ Shared helpers:
 - Antennae waggle: rotate each antenna about its base by
   `3 degrees * sin(2 * PI * LegPhase + side)`, where `side` is 0 for the left
   antenna and `PI` for the right.
-- Shadow: an ellipse under the body, black at 8 percent opacity, offset (2, 3).
+- Shadow: an ellipse roughly the body's footprint, black at 8 percent opacity,
+  offset about 2 DIPs right and 3 DIPs down from the body.
 - Hit disc: a filled circle of `HitRadius` in `Color.FromArgb(1, 0, 0, 0)` drawn
   first for every alive bug. It is visually invisible but non-transparent to
   Windows layered-window hit testing (see 7.2).
 
-Geometry for each species is ported from `assets/bug-specimens.svg`. Each
-specimen there is drawn at roughly 3x on-screen size; painters scale the
-specimen coordinates so the body spans `Species.BodyLength`.
+Geometry for each species is ported from `assets/bug-specimens.svg`. Specimens
+there are drawn much larger than on-screen size; each painter scales the
+specimen coordinates uniformly so the body (head to tail, excluding antennae
+and legs) spans `Species.BodyLength`.
 
 `SplatPainter.Paint(dc, bug, Color bodyColor)` renders a squashed bug: 6 to 9
 overlapping circles in `bodyColor` darkened by 30 percent, each with radius
@@ -403,11 +412,12 @@ simulation.
 
 - `FrameLoop(Action<float> tick)`; `Start()` subscribes to
   `CompositionTarget.Rendering`, `Stop()` unsubscribes.
-- Uses `RenderingEventArgs.RenderingTime` to measure elapsed time; skips the
-  callback if less than `1/60 s - 1 ms` has elapsed since the last accepted
-  frame (the tolerance keeps 120 Hz and 144 Hz monitors at a steady 60 instead
-  of 48); passes the real `dt` (seconds, capped at 0.1 by the simulation) to
-  `tick`.
+- Uses `RenderingEventArgs.RenderingTime` to measure elapsed time. It
+  accumulates elapsed time and fires `tick` when the accumulator reaches
+  `1/60 s`, then subtracts `1/60 s` (carrying the remainder, capped at one
+  frame) rather than resetting to zero, so 120 Hz and 144 Hz monitors both
+  settle at a steady 60 updates per second. The real elapsed `dt` since the
+  last tick (seconds, capped at 0.1 by the simulation) is passed to `tick`.
 - `Start()` after a `Stop()` resets the timestamp so the paused duration is not
   passed as `dt`.
 
@@ -483,19 +493,20 @@ the random walk to reach a state.
   bug is `Fleeing` and its distance from the cursor has increased.
 - Reaction delay: with the cursor close, the bug is not `Fleeing` before
   `ReactionDelayMin` has elapsed.
-- Flee ends: after the cursor moves away, the bug returns to `Pausing` then
-  `Wandering` within 3 s.
+- Flee ends: after the cursor moves away, record the bug's state after every
+  step for 3 s; the sequence contains `Fleeing`, then `Pausing`, then
+  `Wandering` in that order (later chance pauses are ignored).
 - Squash: `TrySquashAt` on a bug's position returns true, the bug is `Squashed`,
   after 2 s of steps it is no longer in `Bugs`, and `TrySquashAt` on empty
   space returns false.
-- Respawn: after a squash the alive count returns to `TargetCount` within 8 s
+- Respawn: after a squash the alive count returns to `TargetCount` within 8.5 s
   of steps, and the new bug spawns outside the bounds heading inward.
 - Respawn reconcile: with a respawn timer running, raising `TargetCount` cancels
   it, and the alive count never exceeds `TargetCount` over the next 10 s.
 - Straggler: construct with `targetCount: 0`, `AddBug` a bug 30 DIPs outside
   the bounds, force `State = Pausing` with `PauseDuration = 100` so it never
-  moves, then set `TargetCount = 1`. After 10 s of steps the bug is gone from
-  `Bugs`, and within a further 8 s a new bug has been spawned by the respawn
+  moves, then set `TargetCount = 1`. After 10.5 s of steps the bug is gone from
+  `Bugs`, and within a further 8.5 s a new bug has been spawned by the respawn
   rule.
 - Target count up and down: raising to 10 spawns 7 immediately; lowering to 1
   leaves exactly one alive bug and keeps any fading squashed bug.
