@@ -76,4 +76,60 @@ public sealed class BugSimulationTests
         Assert.True(bug.Position.X > 30f, $"did not move back in from the edge: {bug.Position}");
         Assert.True(MathF.Cos(bug.TargetHeading) > 0f, $"wander target {bug.TargetHeading} still points off screen");
     }
+
+    [Fact]
+    public void Pausing_bug_is_completely_still_and_its_legs_do_not_move()
+    {
+        var sim = SimulationSteps.Create(0);
+        var bug = sim.AddBug(SimulationSteps.Walker, new Vector2(500, 500), 0.4f);
+        SimulationSteps.StepFor(sim, 0.2f);
+        bug.State = BugState.Pausing;
+        bug.StateTime = 0f;
+        bug.PauseDuration = 5f;
+        var position = bug.Position;
+        float heading = bug.Heading;
+        float legPhase = bug.LegPhase;
+
+        SimulationSteps.StepFor(sim, 1f);
+
+        Assert.Equal(BugState.Pausing, bug.State);
+        Assert.Equal(position, bug.Position);
+        Assert.Equal(heading, bug.Heading);
+        Assert.Equal(legPhase, bug.LegPhase);
+        Assert.Equal(0f, bug.Speed);
+    }
+
+    [Fact]
+    public void Pausing_bug_returns_to_wandering_when_its_pause_ends()
+    {
+        var sim = SimulationSteps.Create(0);
+        var bug = sim.AddBug(SimulationSteps.Walker, new Vector2(500, 500), 0f);
+        bug.State = BugState.Pausing;
+        bug.StateTime = 0f;
+        bug.PauseDuration = 0.5f;
+
+        SimulationSteps.StepFor(sim, 0.4f);
+        Assert.Equal(BugState.Pausing, bug.State);
+
+        SimulationSteps.StepFor(sim, 0.2f);
+        Assert.Equal(BugState.Wandering, bug.State);
+    }
+
+    [Fact]
+    public void Wandering_bug_with_pause_chance_eventually_pauses()
+    {
+        var sim = SimulationSteps.Create(0);
+        var ant = SpeciesCatalog.Get(SpeciesId.BlackGardenAnt);
+        var bug = sim.AddBug(ant, new Vector2(960, 540), 0f);
+
+        bool paused = false;
+        for (int i = 0; i < 60 * 30 && !paused; i++)
+        {
+            sim.Step(SimulationSteps.Dt, null);
+            paused = bug.State == BugState.Pausing;
+        }
+
+        Assert.True(paused, "ant never paused in 30 s at 0.5 pauses per second");
+        Assert.InRange(bug.PauseDuration, ant.PauseMin, ant.PauseMax);
+    }
 }

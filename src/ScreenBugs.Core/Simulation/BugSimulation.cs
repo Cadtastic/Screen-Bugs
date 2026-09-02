@@ -132,6 +132,9 @@ public sealed class BugSimulation(Bounds bounds, IRandomSource rng)
             case BugState.Wandering:
                 UpdateWandering(bug, dt);
                 break;
+            case BugState.Pausing:
+                UpdatePausing(bug);
+                break;
         }
     }
 
@@ -144,6 +147,21 @@ public sealed class BugSimulation(Bounds bounds, IRandomSource rng)
 
         bug.Heading += rng.NextFloat(-HeadingNoise, HeadingNoise) * dt;
         bug.Speed = bug.Species.WalkSpeed * bug.SpeedFactor;
+
+        if (rng.NextFloat() < bug.Species.PauseChancePerSecond * dt)
+        {
+            bug.PauseDuration = rng.NextFloat(bug.Species.PauseMin, bug.Species.PauseMax);
+            EnterState(bug, BugState.Pausing);
+        }
+    }
+
+    private void UpdatePausing(Bug bug)
+    {
+        bug.Speed = 0f;
+        if (bug.StateTime >= bug.PauseDuration)
+        {
+            EnterState(bug, BugState.Wandering);
+        }
     }
 
     /// <summary>Wander retarget (spec 5.3): new target within ±90° of the current heading, 1 to 4 s until the next one.</summary>
@@ -266,10 +284,18 @@ public sealed class BugSimulation(Bounds bounds, IRandomSource rng)
     {
         bug.State = state;
         bug.StateTime = 0f;
-        if (state == BugState.Squashed)
+        switch (state)
         {
-            bug.Speed = 0f;
-            bug.SquashProgress = 0f;
+            case BugState.Wandering:
+                PickNewTarget(bug);
+                break;
+            case BugState.Pausing:
+                bug.Speed = 0f;
+                break;
+            case BugState.Squashed:
+                bug.Speed = 0f;
+                bug.SquashProgress = 0f;
+                break;
         }
     }
 
