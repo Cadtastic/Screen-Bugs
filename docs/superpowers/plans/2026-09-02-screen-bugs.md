@@ -24,6 +24,7 @@
 - `dotnet new xunit -f net10.0` produces xunit 2.9.3 with `Microsoft.NET.Test.Sdk`; `dotnet test` works as usual.
 - `dotnet new wpf -n ScreenBugs -o src/ScreenBugs` (no `-f` flag) produces `App.xaml`, `App.xaml.cs`, `AssemblyInfo.cs`, `MainWindow.xaml`, `MainWindow.xaml.cs`, and a `net10.0-windows` csproj.
 - A csproj with both `UseWPF` and `UseWindowsForms` builds cleanly when the WinForms implicit usings are removed with `<Using Remove="System.Drawing" />` and `<Using Remove="System.Windows.Forms" />`.
+- The complete Core and test code in Chunks 1 and 2 (the state after Task 9) was compiled and run on this machine: 0 compiler warnings, all 37 tests pass, and the seed-sensitive tests (edge steering, flee sequence, respawn, straggler) also pass for seeds 1 through 40. If a test in those chunks fails for you, compare your file against the plan text before changing the simulation rules.
 
 ---
 
@@ -149,15 +150,14 @@ Overwrite `src/ScreenBugs.Core/ScreenBugs.Core.csproj` with:
 </Project>
 ```
 
-- [ ] **Step 4: Add global usings to the test project**
+- [ ] **Step 4: Add a global using to the test project**
 
-Edit `tests/ScreenBugs.Tests/ScreenBugs.Tests.csproj`: keep everything the template generated (the four `PackageReference` lines, the `ProjectReference`, and `<Using Include="Xunit" />`) and add two more `Using` items inside the existing `<ItemGroup>` that holds the Xunit using:
+Edit `tests/ScreenBugs.Tests/ScreenBugs.Tests.csproj`: keep everything the template generated (the four `PackageReference` lines, the `ProjectReference`, and `<Using Include="Xunit" />`) and add one more `Using` item inside the existing `<ItemGroup>` that holds the Xunit using. (A global using for `ScreenBugs.Core.Simulation` is added in Task 2, once that namespace exists; adding it now would fail the build with CS0246.)
 
 ```xml
   <ItemGroup>
     <Using Include="Xunit" />
     <Using Include="System.Numerics" />
-    <Using Include="ScreenBugs.Core.Simulation" />
   </ItemGroup>
 ```
 
@@ -263,7 +263,13 @@ public sealed class SystemRandomSource(int? seed = null) : IRandomSource
 }
 ```
 
-- [ ] **Step 4: Create Bounds**
+- [ ] **Step 4: Create Bounds and the Simulation global using**
+
+Now that the `ScreenBugs.Core.Simulation` namespace exists, add its global using to `tests/ScreenBugs.Tests/ScreenBugs.Tests.csproj`, in the same `<ItemGroup>` as the other two:
+
+```xml
+    <Using Include="ScreenBugs.Core.Simulation" />
+```
 
 Create `src/ScreenBugs.Core/Simulation/Bounds.cs`:
 
@@ -293,7 +299,7 @@ Expected: `Passed! - Failed: 0, Passed: 3`.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/ScreenBugs.Core/Simulation tests/ScreenBugs.Tests/BoundsTests.cs
+git add src/ScreenBugs.Core/Simulation tests/ScreenBugs.Tests/BoundsTests.cs tests/ScreenBugs.Tests/ScreenBugs.Tests.csproj
 git commit -m "feat(core): add IRandomSource, SystemRandomSource and Bounds
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
@@ -543,8 +549,8 @@ public sealed class Bug(int id, BugSpecies species, int seed)
 
     public BugSpecies Species => species;
 
-    /// <summary>Stable per-bug seed for visual variation and the splat shape.</summary>
-    public int Seed => seed;
+    /// <summary>Stable per-bug seed for visual variation and the splat shape. An initialized property (not `=> seed`) because `seed` is also used in the <see cref="SpeedFactor"/> initializer; capturing it as well would trigger CS9124.</summary>
+    public int Seed { get; } = seed;
 
     /// <summary>Multiplies walk and flee speed; in [0.85, 1.15] and fixed by <see cref="Seed"/>.</summary>
     public float SpeedFactor { get; } = 0.85f + 0.30f * new Random(seed).NextSingle();
@@ -616,7 +622,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ### Task 5: BugSimulation skeleton: spawning, hit testing, squashing
 
-This task creates `BugSimulation` with spawning from the edges, `AddBug`, `HitTest`, `TrySquashAt`, and a `Step` that only advances timers and fades squashed bugs. Movement, pausing, fleeing, and respawn are added in Tasks 6 to 9.
+This task creates `BugSimulation` with spawning from the edges, `AddBug`, `HitTest`, `TrySquashAt`, and a `Step` that only advances timers and fades squashed bugs. Movement, pausing, fleeing, and respawn are added in Chunk 2 (Tasks 6 to 9).
 
 **Files:**
 - Create: `src/ScreenBugs.Core/Simulation/BugSimulation.cs`
@@ -642,7 +648,7 @@ internal static class SimulationSteps
         SpeciesCatalog.Get(SpeciesId.BlackGardenAnt) with { PauseChancePerSecond = 0f };
 
     public static BugSimulation Create(int count, int seed = 1234) =>
-        new(Screen, count, new SystemRandomSource(seed));
+        new(Screen, new SystemRandomSource(seed)) { TargetCount = count };
 
     /// <summary>Steps the simulation at 60 Hz for at least <paramref name="seconds"/>.</summary>
     public static void StepFor(BugSimulation sim, float seconds, Vector2? cursor = null)
@@ -670,10 +676,11 @@ namespace ScreenBugs.Tests;
 public sealed class BugSpawnTests
 {
     [Fact]
-    public void Constructor_spawns_the_requested_number_of_bugs()
+    public void Setting_TargetCount_spawns_the_requested_number_of_bugs()
     {
         var sim = SimulationSteps.Create(5);
 
+        Assert.Equal(5, sim.TargetCount);
         Assert.Equal(5, sim.Bugs.Count);
         Assert.Equal(5, SimulationSteps.AliveCount(sim));
         Assert.Equal(5, sim.Bugs.Select(b => b.Id).Distinct().Count());
@@ -800,7 +807,7 @@ Expected: build FAILS with `CS0246: The type or namespace name 'BugSimulation' c
 
 - [ ] **Step 4: Create BugSimulation**
 
-Create `src/ScreenBugs.Core/Simulation/BugSimulation.cs`. The initial population is created in the `bugs` field initializer so the class keeps a primary constructor; `initialCount` is copied into `targetCount` because the target changes later (spec 5.6). The two `Update*` and `Move` hooks are stubs that later tasks fill in.
+Create `src/ScreenBugs.Core/Simulation/BugSimulation.cs`. The class has a primary constructor and no constructor body: the caller sets `TargetCount` (normally in an object initializer) and the setter spawns the initial population, which is the same code path the tray menu uses later (spec 5.6). Keeping `bounds` and `rng` out of field initializers avoids compiler warning CS9124 (parameter both captured and used to initialize a field). `UpdateState` and `Move` are stubs that later tasks fill in.
 
 ```csharp
 using System.Numerics;
@@ -808,19 +815,38 @@ using System.Numerics;
 namespace ScreenBugs.Core.Simulation;
 
 /// <summary>Owns the bugs and steps their behavior (spec section 5). Pure C#; no UI dependencies.</summary>
-public sealed class BugSimulation(Bounds bounds, int initialCount, IRandomSource rng)
+public sealed class BugSimulation(Bounds bounds, IRandomSource rng)
 {
     private const float MaxDt = 0.1f;
     private const float SquashDuration = 1.5f;
 
-    private readonly List<Bug> bugs = Enumerable.Range(0, initialCount)
-        .Select(id => CreateEdgeBug(id, bounds, rng))
-        .ToList();
-
-    private int nextId = initialCount;
-    private int targetCount = initialCount;
+    private readonly List<Bug> bugs = [];
+    private int nextId;
+    private int targetCount;
 
     public IReadOnlyList<Bug> Bugs => bugs;
+
+    /// <summary>How many alive bugs the simulation maintains (spec 5.6). Setting it spawns or removes bugs immediately.</summary>
+    public int TargetCount
+    {
+        get => targetCount;
+        set
+        {
+            targetCount = value;
+            while (AliveCount < targetCount)
+            {
+                SpawnFromEdge();
+            }
+
+            for (int i = bugs.Count - 1; i >= 0 && AliveCount > targetCount; i--)
+            {
+                if (bugs[i].IsAlive)
+                {
+                    bugs.RemoveAt(i);
+                }
+            }
+        }
+    }
 
     private int AliveCount => bugs.Count(b => b.IsAlive);
 
@@ -925,13 +951,11 @@ public sealed class BugSimulation(Bounds bounds, int initialCount, IRandomSource
         }
     }
 
-    private void SpawnFromEdge() => bugs.Add(CreateEdgeBug(nextId++, bounds, rng));
-
-    /// <summary>A random species placed one body length outside a random edge, heading inward ±30° (spec 5.5).</summary>
-    private static Bug CreateEdgeBug(int id, Bounds bounds, IRandomSource rng)
+    /// <summary>Adds a random species one body length outside a random edge, heading inward ±30° (spec 5.5).</summary>
+    private void SpawnFromEdge()
     {
         var species = SpeciesCatalog.All[rng.NextInt(SpeciesCatalog.All.Count)];
-        var bug = new Bug(id, species, rng.NextInt(int.MaxValue));
+        var bug = new Bug(nextId++, species, rng.NextInt(int.MaxValue));
 
         float off = species.BodyLength;
         float along = rng.NextFloat();
@@ -963,7 +987,7 @@ public sealed class BugSimulation(Bounds bounds, int initialCount, IRandomSource
         bug.TargetHeading = bug.Heading;
         bug.RetargetTimer = rng.NextFloat(1f, 4f);
         bug.Speed = species.WalkSpeed * bug.SpeedFactor;
-        return bug;
+        bugs.Add(bug);
     }
 }
 ```
@@ -971,7 +995,7 @@ public sealed class BugSimulation(Bounds bounds, int initialCount, IRandomSource
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `dotnet test tests/ScreenBugs.Tests --filter "FullyQualifiedName~BugSpawnTests|FullyQualifiedName~BugSquashTests" -nologo -v q`
-Expected: `Passed! - Failed: 0, Passed: 9`. The compiler may warn that `targetCount` and `SpawnFromEdge` are unused; that is expected until Task 9.
+Expected: `Passed! - Failed: 0, Passed: 9` with no compiler warnings.
 
 - [ ] **Step 6: Commit**
 
@@ -982,7 +1006,7 @@ git commit -m "feat(core): add BugSimulation with edge spawning, hit testing and
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
 
-Chunk 1 is complete when `dotnet test tests/ScreenBugs.Tests` passes (16 tests) and `git log --oneline` shows five new commits on top of the spec commits.
+Chunk 1 is complete when `dotnet test tests/ScreenBugs.Tests` passes (19 tests) and `git log --oneline` shows five new commits on top of the spec commits.
 
 <!-- end of chunk 1 -->
 
@@ -1070,10 +1094,14 @@ public sealed class BugSimulationTests
         var sim = SimulationSteps.Create(0);
         var bug = sim.AddBug(SimulationSteps.Walker, new Vector2(30, 540), MathF.PI);
 
-        SimulationSteps.StepFor(sim, 2f);
+        for (int i = 0; i < 120; i++)
+        {
+            sim.Step(SimulationSteps.Dt, null);
+            Assert.True(bug.Position.X >= 2f, $"left the screen at step {i}: {bug.Position}");
+        }
 
-        Assert.True(bug.Position.X >= 2f);
-        Assert.True(MathF.Cos(bug.Heading) > 0f, $"heading {bug.Heading} still points off screen");
+        Assert.True(bug.Position.X > 30f, $"did not move back in from the edge: {bug.Position}");
+        Assert.True(MathF.Cos(bug.TargetHeading) > 0f, $"wander target {bug.TargetHeading} still points off screen");
     }
 }
 ```
@@ -1140,13 +1168,22 @@ In `BugSimulation.cs`, replace the `UpdateState` and `Move` stubs with:
     {
         if (bug.State is BugState.Wandering or BugState.Fleeing)
         {
-            Vector2 steer = DesiredDirection(bug, cursor) + EdgeSteerWeight * EdgeRepulsion(bug.Position);
+            Vector2 repulsion = EdgeRepulsion(bug.Position);
+            Vector2 steer = DesiredDirection(bug, cursor) + EdgeSteerWeight * repulsion;
             if (steer.LengthSquared() > 1e-6f)
             {
+                float target = MathF.Atan2(steer.Y, steer.X);
+                if (bug.State == BugState.Wandering && Vector2.Dot(Direction(bug.TargetHeading), repulsion) < 0f)
+                {
+                    // The wander target points into an edge that is pushing back: adopt the steered
+                    // direction so the bug commits to turning away instead of oscillating at the edge.
+                    bug.TargetHeading = target;
+                }
+
                 float turnRate = bug.State == BugState.Fleeing
                     ? FleeTurnMultiplier * bug.Species.TurnRate
                     : bug.Species.TurnRate;
-                bug.Heading = TurnToward(bug.Heading, MathF.Atan2(steer.Y, steer.X), turnRate * dt);
+                bug.Heading = TurnToward(bug.Heading, target, turnRate * dt);
             }
         }
 
@@ -1321,7 +1358,7 @@ Append inside the `BugSimulationTests` class:
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `dotnet test tests/ScreenBugs.Tests --filter "FullyQualifiedName~BugSimulationTests" -nologo -v q`
-Expected: FAIL. `Pausing_bug_is_completely_still...` fails because `Speed` is not zero (no `Pausing` handling yet), and `..._eventually_pauses` fails because the state never changes.
+Expected: FAIL. `Pausing_bug_is_completely_still...` fails on the position assertion because the bug keeps walking (there is no `Pausing` handling yet), and `..._eventually_pauses` fails because the state never changes.
 
 - [ ] **Step 3: Implement pausing**
 
@@ -1750,7 +1787,7 @@ Append inside the `BugSpawnTests` class:
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `dotnet test tests/ScreenBugs.Tests --filter "FullyQualifiedName~BugSpawnTests" -nologo -v q`
-Expected: build FAILS with `CS1061: 'BugSimulation' does not contain a definition for 'RespawnTimer'` (and `TargetCount`).
+Expected: build FAILS with `CS1061: 'BugSimulation' does not contain a definition for 'RespawnTimer'`.
 
 - [ ] **Step 3: Add the respawn constant and state**
 
@@ -1766,37 +1803,16 @@ Add a field after `targetCount`:
     private float? respawnTimer;
 ```
 
-- [ ] **Step 4: Implement TargetCount, RespawnTimer, straggler removal and respawn**
+- [ ] **Step 4: Implement RespawnTimer, timer cancellation, straggler removal and respawn**
 
 Add after the `Bugs` property:
 
 ```csharp
     /// <summary>Seconds until the next respawn, or null when no respawn is pending. Exposed for tests.</summary>
     internal float? RespawnTimer => respawnTimer;
-
-    /// <summary>How many alive bugs the simulation maintains (spec 5.6).</summary>
-    public int TargetCount
-    {
-        get => targetCount;
-        set
-        {
-            targetCount = value;
-            respawnTimer = null;
-            while (AliveCount < targetCount)
-            {
-                SpawnFromEdge();
-            }
-
-            for (int i = bugs.Count - 1; i >= 0 && AliveCount > targetCount; i--)
-            {
-                if (bugs[i].IsAlive)
-                {
-                    bugs.RemoveAt(i);
-                }
-            }
-        }
-    }
 ```
+
+In the `TargetCount` setter, insert `respawnTimer = null;` immediately after `targetCount = value;` so a count change cancels any pending respawn (spec 5.6).
 
 Replace `Step` with:
 
@@ -1900,6 +1916,8 @@ Overwrite `src/ScreenBugs/ScreenBugs.csproj`. The two `Using Remove` lines stop 
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <RootNamespace>ScreenBugs</RootNamespace>
     <AssemblyName>ScreenBugs</AssemblyName>
+    <!-- WFAC010: the WinForms analyzer objects to DPI settings in app.manifest; the manifest is the right place for a WPF host. -->
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -2515,7 +2533,8 @@ public sealed class AntGeometry(Color color, float bodyLength)
     private readonly PathGeometry leftAntenna = Shapes.Polyline(new(-5, -44), new(-14, -58), new(-26, -64));
     private readonly PathGeometry rightAntenna = Shapes.Polyline(new(5, -44), new(14, -58), new(26, -64));
 
-    public Color Color => color;
+    /// <summary>Initialized property rather than `=> color` so the parameter is not both captured and used in initializers (CS9124).</summary>
+    public Color Color { get; } = color;
 
     public void Paint(DrawingContext dc, Bug bug)
     {
@@ -2528,8 +2547,8 @@ public sealed class AntGeometry(Color color, float bodyLength)
         LegPainter.DrawLegPair(dc, legPen, new(-6, -8), new(-22, 4), new(-26, 20), LegPainter.Swing(bug.LegPhase, 0.0, LegAmplitudeDegrees));
 
         dc.PushTransform(new TranslateTransform(BodyMotion.Bob(bug.LegPhase, scale), 0));
-        dc.DrawGeometry(null, antennaPen, leftMandible);
-        dc.DrawGeometry(null, antennaPen, rightMandible);
+        dc.DrawGeometry(null, legPen, leftMandible);
+        dc.DrawGeometry(null, legPen, rightMandible);
         BodyMotion.DrawAntenna(dc, antennaPen, leftAntenna, new Point(-5, -44), bug.LegPhase, 0.0);
         BodyMotion.DrawAntenna(dc, antennaPen, rightAntenna, new Point(5, -44), bug.LegPhase, Math.PI);
         dc.DrawEllipse(body, null, new Point(0, -36), 10, 10);
@@ -2754,7 +2773,7 @@ public partial class App : Application
         base.OnStartup(e);
 
         var bounds = new Bounds((float)SystemParameters.PrimaryScreenWidth, (float)SystemParameters.PrimaryScreenHeight);
-        var simulation = new BugSimulation(bounds, InitialBugCount, new SystemRandomSource());
+        var simulation = new BugSimulation(bounds, new SystemRandomSource()) { TargetCount = InitialBugCount };
 
         var window = new OverlayWindow();
         window.Surface.Simulation = simulation;
@@ -2788,8 +2807,10 @@ While the app runs, confirm each:
 
 1. Ants wander, pause, and turn; legs animate while walking and stop while paused.
 2. Clicking and typing in a browser or editor works normally everywhere the ants are not.
-3. Moving the cursor toward an ant makes it run; a quick decisive click on an ant makes it vanish (the splat comes in Chunk 4).
+3. Moving the cursor toward an ant makes it run; a quick decisive click on an ant makes it vanish (the splat comes in Chunk 4), and a replacement ant walks in from an edge 3 to 8 s later.
 4. Alt-Tab shows no "Screen Bugs" entry, and after squashing an ant the app you were using still has keyboard focus.
+
+The ants are about 16 DIPs long, so on a high-resolution display run these checks with `InitialBugCount` temporarily at `10` (Step 4 needs that anyway).
 
 If a click on an ant passes through to the app underneath instead of squashing it, check `ClickThroughController.Update` is being called with `true` when the cursor is over a bug (set a breakpoint or a `Debug.WriteLine`) before changing anything else.
 
@@ -2800,7 +2821,7 @@ Temporarily change `InitialBugCount` to `10`, rebuild, run in Release, and watch
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/ScreenBugs/App.xaml.cs
+git add src/ScreenBugs
 git commit -m "feat(app): compose simulation, overlay window and frame loop
 
 Measured CPU with 10 bugs at <resolution>: <n> percent.
@@ -3441,7 +3462,7 @@ Replace `[SpeciesId.Centipede] = Placeholder,` with `[SpeciesId.Centipede] = new
 
 - [ ] **Step 3: Build, look, commit**
 
-Expected: a segmented orange centipede whose yellow legs ripple in a wave from head to tail.
+Expected: a segmented orange centipede whose yellow legs ripple in a wave along the body.
 
 ```bash
 git add src/ScreenBugs/Rendering
@@ -3975,7 +3996,7 @@ public partial class App : Application
         }
 
         var bounds = new Bounds((float)SystemParameters.PrimaryScreenWidth, (float)SystemParameters.PrimaryScreenHeight);
-        var simulation = new BugSimulation(bounds, InitialBugCount, new SystemRandomSource());
+        var simulation = new BugSimulation(bounds, new SystemRandomSource()) { TargetCount = InitialBugCount };
 
         var window = new OverlayWindow();
         window.Surface.Simulation = simulation;

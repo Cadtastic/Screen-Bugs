@@ -39,7 +39,7 @@ Non-goals for v1 (candidates for later):
 
 ```
 ScreenSavers/                                  repo root
-  ScreenBugs.sln
+  ScreenBugs.slnx                              (the .NET 10 SDK's default solution format)
   src/ScreenBugs.Core/                         net10.0 class library, no UI refs
     ScreenBugs.Core.csproj
     Simulation/
@@ -189,7 +189,7 @@ cycle at 60 fps, and does not strobe.
 - `bool HitTest(Vector2 point)` returns true when alive and
   `Distance(point, Position) <= Species.HitRadius`.
 
-`BugSimulation(Bounds bounds, int targetCount, IRandomSource rng)`:
+`BugSimulation(Bounds bounds, IRandomSource rng)`:
 - `IReadOnlyList<Bug> Bugs`.
 - `int TargetCount { get; set; }` (see 5.6).
 - `void Step(float dt, Vector2? cursor)`; `cursor` is null when unknown.
@@ -199,7 +199,9 @@ cycle at 60 fps, and does not strobe.
 - `Bug AddBug(BugSpecies species, Vector2 position, float heading)` places a
   wandering bug at an exact position. It exists so tests can arrange scenarios;
   the app never calls it.
-- Constructor spawns `targetCount` bugs immediately (see 5.5).
+- The constructor spawns nothing. The caller sets `TargetCount` (normally in an
+  object initializer), and that setter spawns the initial population (see 5.5
+  and 5.6).
 
 Test access: `Bug`'s mutable properties have `internal` setters and
 `ScreenBugs.Core` declares `InternalsVisibleTo("ScreenBugs.Tests")`, so tests
@@ -263,7 +265,11 @@ cursor leaves the radius before the timer expires, the timer is cancelled.
   vector `r`; outside the screen `d` is negative, so the inward push keeps
   growing the farther out a bug is. If `r` is non-zero, the effective target
   direction is `normalize(desiredDir + 2 * r)`. This applies to both wandering
-  and fleeing.
+  and fleeing. While wandering, if the current `TargetHeading` points into an
+  edge that is pushing back (its direction has a negative dot product with
+  `r`), `TargetHeading` is replaced by the effective target direction, so the
+  bug commits to turning away instead of oscillating at the edge until its next
+  retarget.
 - Turning: rotate `Heading` toward the effective target by at most
   `turnRate * dt` per step, taking the shorter way around.
 - Move: `Position += (cos Heading, sin Heading) * Speed * dt`.
@@ -283,8 +289,8 @@ cursor leaves the radius before the timer expires, the timer is cancelled.
 - Stragglers: a bug that has not entered the screen within 10 s of spawning
   (`Age >= 10` while `HasEnteredScreen` is false) is removed. The respawn rule
   below then replaces it.
-- Initial population: the constructor calls `SpawnFromEdge()` `targetCount`
-  times.
+- Initial population: setting `TargetCount` on a fresh simulation spawns that
+  many bugs from the edges (5.6).
 - Respawn: whenever `aliveCount < TargetCount` and no respawn timer is running,
   start one with `U(3, 8)` s. When it expires, clear the timer and spawn one bug
   only if `aliveCount < TargetCount` still holds. Because the check runs every
@@ -464,8 +470,8 @@ canvas.Redraw()
 - `OnStartup`:
   1. `SingleInstanceGuard.TryAcquire()` opens a named mutex
      `Local\ScreenBugs.SingleInstance`; if it already exists, shut down quietly.
-  2. Create `BugSimulation(bounds from primary screen, targetCount: 3,
-     new SystemRandomSource())`.
+  2. Create `BugSimulation(bounds from primary screen, new SystemRandomSource())`
+     with `TargetCount = 3`.
   3. Create `OverlayWindow`, assign the simulation to its canvas, show it.
   4. Create `TrayIcon`; wire `PauseToggled` to hide/show the window and
      stop/start the `FrameLoop` and `TopmostKeeper`; wire `BugCountChanged` to
