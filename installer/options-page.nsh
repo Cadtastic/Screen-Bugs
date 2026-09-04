@@ -145,3 +145,27 @@ Function ValidateOptions
     StrCpy $DesktopShortcut "0"
   ${EndIf}
 FunctionEnd
+
+Var un.Dialog
+Var un.DeleteDataBox
+
+Function un.OptionsPage
+  !insertmacro MUI_HEADER_TEXT "Remove Screen Bugs" "Choose whether to keep your settings."
+
+  nsDialogs::Create 1018
+  Pop $un.Dialog
+  ${If} $un.Dialog == error
+    Abort
+  ${EndIf}
+
+  ${NSD_CreateCheckBox} 0 0 100% 12u "Also delete my Screen Bugs settings"
+  Pop $un.DeleteDataBox
+  ${NSD_CreateLabel} 0 18u 100% 32u "Leave this unticked to keep your options and crash log in case you reinstall. Ticking it removes $LocalData."
+  Pop $R0
+
+  nsDialogs::Show
+FunctionEnd
+
+Function un.OptionsPageLeave
+  ${NSD_GetState} $un.DeleteDataBox $DeleteData
+FunctionEnd

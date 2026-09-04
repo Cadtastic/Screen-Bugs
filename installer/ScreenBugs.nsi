@@ -96,8 +96,7 @@ Page custom OptionsPage OptionsPageLeave
 !insertmacro MUI_PAGE_FINISH
 
 !insertmacro MUI_UNPAGE_CONFIRM
-; The custom uninstall page is inserted here in Task 9, once its functions exist. Referencing
-; them now would fail the compile with: resolving create-page function "un.OptionsPage".
+UninstPage custom un.OptionsPage un.OptionsPageLeave
 !insertmacro MUI_UNPAGE_INSTFILES
 
 !insertmacro MUI_LANGUAGE "English"
@@ -261,7 +260,40 @@ Section "Install"
 SectionEnd
 
 Section "Uninstall"
+  ; --- Close a running instance first, so it cannot re-create error.log after the delete.
+  System::Call 'kernel32::OpenMutex(i 0x00100000, i 0, t "${MUTEX_NAME}") p .r0'
+  ${If} $0 <> 0
+    System::Call 'kernel32::CloseHandle(p r0)'
+    nsExec::ExecToStack 'taskkill /F /IM ScreenBugs.exe'
+    Pop $0
+    Pop $1
+    Sleep 500
+  ${EndIf}
+
+  ; --- Optional data removal. $LocalData was captured in un.onInit with the current-user
+  ;     context, because under SetShellVarContext all, $LOCALAPPDATA is C:\ProgramData.
+  ${If} $DeleteData == "1"
+    RMDir /r "$LocalData"
+  ${EndIf}
+
+  ; --- The Run value. The app may have created it, and leaving it behind would make Windows
+  ;     try to launch a deleted executable at every sign-in. Kept only under /UPGRADE=1,
+  ;     where the installer that invoked this is about to install a copy the app will
+  ;     re-point the value at.
+  ${If} $Upgrade != "1"
+    DeleteRegValue HKCU "${RUN_KEY}" "ScreenBugs"
+  ${EndIf}
+
+  Delete "$SMPROGRAMS\Screen Bugs.lnk"
+  Delete "$DESKTOP\Screen Bugs.lnk"
+
+  ; Guarded so a bad $INSTDIR cannot delete an unrelated folder. Uninstall.exe goes with it:
+  ; NSIS relocates a normally-launched uninstaller to $TEMP, so the original is not in use.
   ${If} ${FileExists} "$INSTDIR\ScreenBugs.exe"
     RMDir /r "$INSTDIR"
+  ${Else}
+    DetailPrint "Skipping $INSTDIR: it does not look like a Screen Bugs installation."
   ${EndIf}
+
+  DeleteRegKey SHCTX "${UNINSTALL_KEY}"
 SectionEnd
