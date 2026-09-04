@@ -2392,9 +2392,15 @@ git add build/verify-install.ps1
 git commit -m "$(cat <<'EOF'
 test(installer): assert the option plumbing end to end
 
-Drives the real setup silently in three cases and checks the written
+Drives the real setup silently in four cases and checks the written
 seed, the Add/Remove Programs values and the shortcuts, then uninstalls
 and checks the cleanup.
+
+The fourth case passes no option switches at all. That is the
+regression test for ${GetOptions} clearing its destination when a
+switch is absent, which made a plain install seed BugCount 1 instead of
+5; every other case passes at least one switch, so none of them would
+catch it coming back.
 
 Uninstall is run with _?= so the assertions cannot race: without it the
 launched uninstaller relocates itself to $TEMP and returns immediately.
