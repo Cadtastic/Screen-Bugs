@@ -136,11 +136,36 @@ Function .onInit
   StrCpy $Startup "1"
   StrCpy $DesktopShortcut "0"
 
+  ; ${GetOptions} clears its destination variable when the switch is absent, which would wipe
+  ; the defaults set just above. For the count that is visible: ValidateOptions reads the empty
+  ; string as 0 and clamps it to 1, so the wizard's spinner opens on 1 instead of 5. Read into a
+  ; scratch variable and keep it only when the switch was actually present.
   ${GetParameters} $R0
-  ${GetOptions} $R0 "/BUGTYPE=" $BugType
-  ${GetOptions} $R0 "/BUGCOUNT=" $BugCount
-  ${GetOptions} $R0 "/STARTUP=" $Startup
-  ${GetOptions} $R0 "/DESKTOP=" $DesktopShortcut
+
+  ClearErrors
+  ${GetOptions} $R0 "/BUGTYPE=" $R1
+  ${IfNot} ${Errors}
+    StrCpy $BugType $R1
+  ${EndIf}
+
+  ClearErrors
+  ${GetOptions} $R0 "/BUGCOUNT=" $R1
+  ${IfNot} ${Errors}
+    StrCpy $BugCount $R1
+  ${EndIf}
+
+  ClearErrors
+  ${GetOptions} $R0 "/STARTUP=" $R1
+  ${IfNot} ${Errors}
+    StrCpy $Startup $R1
+  ${EndIf}
+
+  ClearErrors
+  ${GetOptions} $R0 "/DESKTOP=" $R1
+  ${IfNot} ${Errors}
+    StrCpy $DesktopShortcut $R1
+  ${EndIf}
+
   Call ValidateOptions
 FunctionEnd
 
@@ -150,9 +175,22 @@ Function un.onInit
 
   StrCpy $Upgrade "0"
   StrCpy $DeleteData "0"
+  ; Same guard as .onInit: an absent switch would blank the "0" defaults above. Both checks
+  ; below happen to treat "" the same as "0", so this is defensive rather than a live bug --
+  ; but leaving the defaults visibly overwritten would mislead the next reader.
   ${un.GetParameters} $R0
-  ${un.GetOptions} $R0 "/UPGRADE=" $Upgrade
-  ${un.GetOptions} $R0 "/DELETEDATA=" $DeleteData
+
+  ClearErrors
+  ${un.GetOptions} $R0 "/UPGRADE=" $R1
+  ${IfNot} ${Errors}
+    StrCpy $Upgrade $R1
+  ${EndIf}
+
+  ClearErrors
+  ${un.GetOptions} $R0 "/DELETEDATA=" $R1
+  ${IfNot} ${Errors}
+    StrCpy $DeleteData $R1
+  ${EndIf}
 
   ; With SetShellVarContext all, $LOCALAPPDATA resolves to C:\ProgramData, so the real
   ; per-user path is captured here and the context put back where MULTIUSER_UNINIT left it.
