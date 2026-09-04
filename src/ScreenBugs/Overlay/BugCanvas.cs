@@ -22,16 +22,22 @@ public sealed class BugCanvas : FrameworkElement
 
         foreach (var bug in Simulation.Bugs)
         {
+            var center = new Point(bug.Position.X, bug.Position.Y);
+            var painter = painters.Get(bug.Species.Id);
+
             if (!bug.IsAlive)
             {
+                // A splat has no heading, so it is translated but not rotated.
+                dc.PushTransform(new TranslateTransform(center.X, center.Y));
+                SplatPainter.Paint(dc, bug, painter.BodyColor);
+                dc.Pop();
                 continue;
             }
 
-            var center = new Point(bug.Position.X, bug.Position.Y);
             dc.DrawEllipse(PainterPens.HitDisc, null, center, bug.Species.HitRadius, bug.Species.HitRadius);
             dc.PushTransform(new TranslateTransform(center.X, center.Y));
             dc.PushTransform(new RotateTransform(bug.Heading * 180.0 / Math.PI + 90.0));
-            painters.Get(bug.Species.Id).Paint(dc, bug);
+            painter.Paint(dc, bug);
             dc.Pop();
             dc.Pop();
         }
