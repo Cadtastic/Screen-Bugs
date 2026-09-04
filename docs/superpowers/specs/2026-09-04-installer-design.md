@@ -280,6 +280,14 @@ does, and whose comment already describes as repairing a stale entry. It never
 creates a value that was absent, so it cannot turn startup on behind the user's
 back.
 
+`SetEnabled` writes the path **quoted**, so the comparison must trim the quotes
+before comparing, case-insensitively; comparing the raw value against
+`Environment.ProcessPath` never matches and would rewrite on every launch.
+
+Nothing races the Options dialog: `SettingsBootstrap.Load` runs in
+`App.OnStartup`, long before a dialog can exist, and `OnOk` re-asserts the
+user's choice afterwards either way.
+
 `SettingsBootstrap.Load` calls it on **every** launch, not just a first run:
 that is what makes the relocation upgrade of section 5.7 preserve the user's
 choice. It costs one registry read per launch.
@@ -456,6 +464,11 @@ a live value label beside a slider would need dialog subclassing, and a spinner
 shows its value without one. The leave function clamps the typed value into
 1–50 — the app clamps too, but clamping here means the written seed says what
 the installer showed.
+
+One naming trap, which `makensis` catches but only after the script is
+otherwise complete: `Var Desktop` fails to compile with `name "Desktop" in use
+by constant`, because `$DESKTOP` is a built-in. Name that variable something
+else — `$DesktopShortcut`.
 
 The desktop-shortcut checkbox drives the install section directly. A Start Menu
 shortcut is always created; a desktop shortcut is opt-in because Screen Bugs
