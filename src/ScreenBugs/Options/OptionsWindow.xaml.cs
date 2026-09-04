@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using ScreenBugs.Settings;
+using ScreenBugs.Tray;
 
 namespace ScreenBugs.Options;
 
@@ -23,6 +24,9 @@ public partial class OptionsWindow : Window
     public OptionsWindow(BugOptions initial, OptionsApplier applier)
     {
         InitializeComponent();
+
+        // Same glyph as the tray, so the title bar and taskbar match it.
+        Icon = TrayIconFactory.CreateImageSource();
 
         this.initial = initial;
         this.applier = applier;
