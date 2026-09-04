@@ -1,0 +1,101 @@
+name: Release
+
+# Tagging is the trigger: push v1.2.3 and this builds the installer, verifies it by
+# actually installing it, and publishes a GitHub Release with the setup executable.
+#
+# Directory.Build.props stays the single source of truth for the version. The tag has to
+# agree with it, and the job fails loudly if it does not, so an installer whose Add/Remove
+# Programs entry contradicts its release tag cannot ship.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # Windows is not optional: the app is WPF, and makensis builds the installer.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          choco install nsis --no-progress -y
+          # build-installer.ps1 looks on PATH first, then at this fallback, which is where
+          # the package puts it. Fail here rather than three minutes into a publish.
+          $makensis = Join-Path ${env:ProgramFiles(x86)} 'NSIS/makensis.exe'
+          if (-not (Test-Path $makensis)) {
+              throw "NSIS did not install to the expected location: $makensis"
+          }
+          & $makensis /VERSION
+
+      - name: Check the tag matches Directory.Build.props
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = '${{ github.ref_name }}'
+          $version = (dotnet msbuild Directory.Build.props -getProperty:Version -nologo).Trim()
+
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+              throw "Could not read a three-part version from Directory.Build.props (got '$version')."
+          }
+          if ($tag -ne "v$version") {
+              throw "Tag '$tag' does not match Directory.Build.props version '$version'. Bump the props, commit, and re-tag."
+          }
+
+          Write-Host "Tag $tag matches version $version."
+          "version=$version" >> $env:GITHUB_OUTPUT
+        id: version
+
+      - name: Build the installer
+        shell: pwsh
+        run: ./build/build-installer.ps1
+
+      - name: Verify the installer
+        shell: pwsh
+        # Installs the freshly built setup four ways and asserts the seed, the Add/Remove
+        # Programs values and the shortcuts, then uninstalls and asserts the cleanup. The
+        # runner is disposable, so this is the one place it can run without touching anyone's
+        # real machine state.
+        run: ./build/verify-install.ps1
+
+      - name: Checksum
+        shell: pwsh
+        # The installer is unsigned, so a published hash is the only way anyone can tell they
+        # downloaded what was built here.
+        run: |
+          $setup = "build/ScreenBugs-Setup-${{ steps.version.outputs.version }}.exe"
+          (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower() + "  " + (Split-Path $setup -Leaf) |
+              Set-Content "$setup.sha256"
+          Get-Content "$setup.sha256"
+
+      - name: Publish the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ steps.version.outputs.version }}'
+          $setup = "build/ScreenBugs-Setup-$version.exe"
+
+          # The notes live in their own file so this stays out of the way of YAML block
+          # scalars and PowerShell's backtick escape, both of which mangle inline markdown.
+          $notes = (Get-Content .github/release-notes.md -Raw).Replace('{VERSION}', $version)
+          Set-Content release-notes.txt $notes
+
+          # First argument is the TAG (v1.0.0), not the bare version (1.0.0).
+          gh release create '${{ github.ref_name }}' `
+              --title "Screen Bugs $version" `
+              --notes-file release-notes.txt `
+              --verify-tag `
+              $setup "$setup.sha256"
