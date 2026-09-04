@@ -37,7 +37,7 @@ public partial class App : Application
         }
 
         var bounds = new Bounds((float)SystemParameters.PrimaryScreenWidth, (float)SystemParameters.PrimaryScreenHeight);
-        current = SettingsStore.Load();
+        current = SettingsBootstrap.Load();
         var rng = new SystemRandomSource();
         var speciesSource = new SlotSpeciesSource(rng) { Slots = current.TypeSlots };
         var simulation = new BugSimulation(bounds, rng, speciesSource) { TargetCount = current.BugCount };
