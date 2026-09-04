@@ -2123,7 +2123,9 @@ This one is slow — a full Release publish plus a solid-LZMA compress of ~155 M
 pwsh -NoProfile -File build/build-installer.ps1
 ```
 
-Expected: `Built .../build/ScreenBugs-Setup-1.0.0.exe`, roughly 60–75 MB, from ~254 published files.
+Expected: `Built .../build/ScreenBugs-Setup-1.0.0.exe`, roughly 45–50 MB, from 254 published
+files totalling ~155 MB. The measured build is 47.7 MB — solid LZMA compresses the
+ReadyToRun payload better than the first estimate assumed.
 
 - [ ] **Step 4: Install the real thing**
 
