@@ -2,19 +2,43 @@ namespace ScreenBugs.Tests;
 
 public sealed class SettingsSerializerTests
 {
-    private static readonly BugTypeSlot Ant = new(SpeciesId.BlackGardenAnt);
-    private static readonly BugTypeSlot Centipede = new(SpeciesId.Centipede);
+    private static readonly SlotSetting Ant = SlotSetting.For(SpeciesId.BlackGardenAnt);
+    private static readonly SlotSetting Centipede = SlotSetting.For(SpeciesId.Centipede);
 
     [Fact]
-    public void Round_trip_preserves_every_field()
+    public void Round_trip_preserves_every_field_including_speeds()
     {
         var original = new BugOptions(
-            [Ant, BugTypeSlot.Random, new BugTypeSlot(SpeciesId.PrayingMantis)],
+            [
+                SlotSetting.For(SpeciesId.BlackGardenAnt, 2.5f),
+                new SlotSetting(BugTypeSlot.Random, 0.5f),
+                SlotSetting.For(SpeciesId.PrayingMantis),
+            ],
             BugCount: 7,
             FrameRate: 120,
             TypeChangeBehavior.AgeOut);
 
         Assert.Equal(original, SettingsSerializer.Deserialize(SettingsSerializer.Serialize(original)));
+    }
+
+    [Fact]
+    public void A_bare_type_name_from_an_older_file_loads_at_the_default_speed()
+    {
+        var options = SettingsSerializer.Deserialize("""{"TypeSlots":["Centipede","Random"]}""");
+
+        Assert.Equal([Centipede.Type, BugTypeSlot.Random], options.TypeSlots.Select(s => s.Type));
+        Assert.All(options.TypeSlots, slot => Assert.Equal(SlotSetting.DefaultSpeed, slot.SpeedMultiplier));
+    }
+
+    [Fact]
+    public void An_out_of_range_or_missing_speed_is_repaired()
+    {
+        var options = SettingsSerializer.Deserialize(
+            """{"TypeSlots":[{"Type":"Centipede","Speed":99},{"Type":"Random"},{"Type":"StagBeetle","Speed":"fast"}]}""");
+
+        Assert.Equal(SlotSetting.MaxSpeed, options.TypeSlots[0].SpeedMultiplier);
+        Assert.Equal(SlotSetting.DefaultSpeed, options.TypeSlots[1].SpeedMultiplier);
+        Assert.Equal(SlotSetting.DefaultSpeed, options.TypeSlots[2].SpeedMultiplier);
     }
 
     [Theory]
@@ -34,7 +58,7 @@ public sealed class SettingsSerializerTests
     {
         var options = SettingsSerializer.Deserialize("""{"TypeSlots":["Centipede"],"BugCount":"5"}""");
 
-        Assert.Equal([Centipede], options.TypeSlots);
+        Assert.Equal([Centipede.Type], options.TypeSlots.Select(s => s.Type));
         Assert.Equal(5, options.BugCount);
     }
 
@@ -43,7 +67,7 @@ public sealed class SettingsSerializerTests
     {
         var options = SettingsSerializer.Deserialize("""{"TypeSlots":["Centipede","99","Unicorn",null,5]}""");
 
-        Assert.Equal([Centipede], options.TypeSlots);
+        Assert.Equal([Centipede.Type], options.TypeSlots.Select(s => s.Type));
     }
 
     [Fact]
@@ -51,7 +75,7 @@ public sealed class SettingsSerializerTests
     {
         var options = SettingsSerializer.Deserialize("""{"TypeSlots":["random","blackgardenant"]}""");
 
-        Assert.Equal([BugTypeSlot.Random, Ant], options.TypeSlots);
+        Assert.Equal([BugTypeSlot.Random, Ant.Type], options.TypeSlots.Select(s => s.Type));
     }
 
     [Fact]
@@ -67,7 +91,7 @@ public sealed class SettingsSerializerTests
     {
         var options = SettingsSerializer.Deserialize("""{"TypeSlots":["Centipede","Centipede"]}""");
 
-        Assert.Equal([Centipede], options.TypeSlots);
+        Assert.Equal([Centipede.Type], options.TypeSlots.Select(s => s.Type));
     }
 
     [Theory]

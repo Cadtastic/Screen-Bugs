@@ -20,7 +20,11 @@ public static class SettingsSerializer
         var slots = new JsonArray();
         foreach (var slot in options.TypeSlots)
         {
-            slots.Add(slot.Species is { } species ? species.ToString() : RandomName);
+            slots.Add(new JsonObject
+            {
+                ["Type"] = slot.Type.Species is { } species ? species.ToString() : RandomName,
+                ["Speed"] = slot.SpeedMultiplier,
+            });
         }
 
         var root = new JsonObject
@@ -58,14 +62,14 @@ public static class SettingsSerializer
             ReadTypeChange(root["OnTypeChange"]));
     }
 
-    private static IReadOnlyList<BugTypeSlot> ReadSlots(JsonNode? node)
+    private static IReadOnlyList<SlotSetting> ReadSlots(JsonNode? node)
     {
         if (node is not JsonArray array)
         {
             return BugOptions.Default.TypeSlots;
         }
 
-        var slots = new List<BugTypeSlot>();
+        var slots = new List<SlotSetting>();
         foreach (var element in array)
         {
             if (TryReadSlot(element, out var slot))
@@ -77,28 +81,42 @@ public static class SettingsSerializer
         return slots.Count == 0 ? BugOptions.Default.TypeSlots : BugTypeSlots.Sanitize(slots);
     }
 
-    private static bool TryReadSlot(JsonNode? node, out BugTypeSlot slot)
+    /// <summary>
+    /// Reads a row as either {"Type": "...", "Speed": n} or, from files written before speeds
+    /// existed, a bare type name at the default speed.
+    /// </summary>
+    private static bool TryReadSlot(JsonNode? node, out SlotSetting slot)
     {
-        slot = BugTypeSlot.Random;
-        if (node is not JsonValue value || !value.TryGetValue(out string? name) || name is null)
+        slot = SlotSetting.Random;
+
+        JsonNode? typeNode = node is JsonObject slotObject ? slotObject["Type"] : node;
+        if (typeNode is not JsonValue typeValue || !typeValue.TryGetValue(out string? name) || name is null)
         {
             return false;
         }
 
+        float speed = node is JsonObject withSpeed ? ReadSpeed(withSpeed["Speed"]) : SlotSetting.DefaultSpeed;
+
         if (string.Equals(name, RandomName, StringComparison.OrdinalIgnoreCase))
         {
+            slot = new SlotSetting(BugTypeSlot.Random, speed);
             return true;
         }
 
         // TryParse alone accepts numeric strings such as "99", so IsDefined must confirm it.
         if (Enum.TryParse(name, ignoreCase: true, out SpeciesId species) && Enum.IsDefined(species))
         {
-            slot = new BugTypeSlot(species);
+            slot = new SlotSetting(new BugTypeSlot(species), speed);
             return true;
         }
 
         return false;
     }
+
+    private static float ReadSpeed(JsonNode? node) =>
+        node is JsonValue value && value.TryGetValue(out double speed)
+            ? SlotSetting.ClampSpeed((float)speed)
+            : SlotSetting.DefaultSpeed;
 
     private static int ReadBugCount(JsonNode? node) =>
         node is JsonValue value && value.TryGetValue(out int count)

@@ -4,13 +4,17 @@ using Microsoft.Win32;
 
 namespace ScreenBugs.Tray;
 
-/// <summary>Draws the tray glyph (an ant seen from above) so no icon asset is needed.</summary>
+/// <summary>
+/// Draws the tray glyph (an ant seen from above) so no icon asset is needed: black on a light
+/// system theme, red on a dark one.
+/// </summary>
 public static class TrayIconFactory
 {
     public static Icon Create()
     {
-        // Windows 11's taskbar is dark by default, where a black ant is invisible.
-        Color glyph = TaskbarIsLight() ? Color.FromArgb(28, 28, 28) : Color.FromArgb(240, 240, 240);
+        // A black ant reads well on a light taskbar but vanishes on Windows 11's default dark one,
+        // so the dark theme gets a red ant instead.
+        Color glyph = TaskbarIsLight() ? Color.FromArgb(24, 24, 24) : Color.FromArgb(216, 50, 31);
 
         using var bitmap = new Bitmap(32, 32);
         using (var graphics = Graphics.FromImage(bitmap))

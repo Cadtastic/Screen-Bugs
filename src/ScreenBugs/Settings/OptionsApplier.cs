@@ -15,8 +15,10 @@ public sealed class OptionsApplier(BugSimulation simulation, SlotSpeciesSource s
 
         if (!previous.TypeSlots.SequenceEqual(next.TypeSlots))
         {
+            // Always push the rows: bugs read their speed from here every frame, so a speed-only
+            // edit reaches the screen at once. Only a change of *types* may respawn.
             species.Slots = next.TypeSlots;
-            if (onSlotChange == TypeChangeBehavior.RespawnAll)
+            if (!previous.HasSameTypesAs(next) && onSlotChange == TypeChangeBehavior.RespawnAll)
             {
                 simulation.RespawnAll();
                 respawned = true;

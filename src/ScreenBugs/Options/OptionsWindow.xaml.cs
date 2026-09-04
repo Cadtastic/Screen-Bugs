@@ -92,9 +92,33 @@ public partial class OptionsWindow : Window
                 box.Items.Add(BugTypeChoice.From(choice));
             }
 
-            box.SelectedItem = box.Items.Cast<BugTypeChoice>().First(item => item.Slot == edited.TypeSlots[index]);
+            box.SelectedItem = box.Items.Cast<BugTypeChoice>().First(item => item.Slot == edited.TypeSlots[index].Type);
             box.SelectionChanged += OnSlotChanged;
             row.Children.Add(box);
+
+            var readout = new TextBlock
+            {
+                Width = 38,
+                Margin = new Thickness(8, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                Text = SpeedLabel(edited.TypeSlots[index].SpeedMultiplier),
+            };
+
+            var speed = new Slider
+            {
+                Width = 130,
+                Minimum = SlotSetting.MinSpeed,
+                Maximum = SlotSetting.MaxSpeed,
+                TickFrequency = 0.25,
+                IsSnapToTickEnabled = true,
+                VerticalAlignment = VerticalAlignment.Center,
+                Value = edited.TypeSlots[index].SpeedMultiplier,
+                Tag = (index, readout),
+            };
+            speed.ValueChanged += OnSpeedChanged;
+            row.Children.Add(speed);
+            row.Children.Add(readout);
+
             SlotPanel.Children.Add(row);
         }
     }
@@ -107,10 +131,35 @@ public partial class OptionsWindow : Window
         }
 
         var slots = edited.TypeSlots.ToList();
-        slots[index] = choice.Slot;
+        slots[index] = slots[index] with { Type = choice.Slot };
         UpdateEdited(edited with { TypeSlots = slots });
         RebuildRowsSuppressed();
     }
+
+    private void OnSpeedChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (sender is not Slider { Tag: ValueTuple<int, TextBlock> tag })
+        {
+            return;
+        }
+
+        var (index, readout) = tag;
+        float speed = SlotSetting.ClampSpeed((float)e.NewValue);
+        readout.Text = SpeedLabel(speed);
+
+        if (suppress || index >= edited.TypeSlots.Count)
+        {
+            return;
+        }
+
+        var slots = edited.TypeSlots.ToList();
+        slots[index] = slots[index] with { SpeedMultiplier = speed };
+
+        // Speeds are read live by the simulation, so this never respawns the population.
+        UpdateEdited(edited with { TypeSlots = slots });
+    }
+
+    private static string SpeedLabel(float speed) => $"{speed:0.##}x";
 
     private void OnSlotCountChanged(object sender, SelectionChangedEventArgs e)
     {

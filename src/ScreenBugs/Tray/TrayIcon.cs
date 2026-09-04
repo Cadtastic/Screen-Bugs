@@ -46,6 +46,7 @@ public sealed class TrayIcon : IDisposable
             ContextMenuStrip = menu,
             Visible = true,
         };
+        notifyIcon.DoubleClick += (_, _) => OptionsRequested?.Invoke();
     }
 
     /// <summary>
