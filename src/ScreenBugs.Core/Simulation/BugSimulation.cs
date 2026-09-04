@@ -3,7 +3,7 @@ using System.Numerics;
 namespace ScreenBugs.Core.Simulation;
 
 /// <summary>Owns the bugs and steps their behavior (spec section 5). Pure C#; no UI dependencies.</summary>
-public sealed class BugSimulation(Bounds bounds, IRandomSource rng)
+public sealed class BugSimulation(Bounds bounds, IRandomSource rng, ISpeciesSource speciesSource)
 {
     private const float MaxDt = 0.1f;
     private const float SquashDuration = 1.5f;
@@ -104,6 +104,20 @@ public sealed class BugSimulation(Bounds bounds, IRandomSource rng)
 
         EnterState(bug, BugState.Squashed);
         return true;
+    }
+
+    /// <summary>
+    /// Removes every alive bug and walks a fresh population in from the edges. Squashed bugs are
+    /// left to finish fading. Used when the selected bug types change.
+    /// </summary>
+    public void RespawnAll()
+    {
+        bugs.RemoveAll(bug => bug.IsAlive);
+        respawnTimer = null;
+        while (AliveCount < targetCount)
+        {
+            SpawnFromEdge();
+        }
     }
 
     /// <summary>Advances the world by <paramref name="dt"/> seconds (clamped to 0.1). <paramref name="cursor"/> is null when unknown.</summary>
@@ -416,7 +430,7 @@ public sealed class BugSimulation(Bounds bounds, IRandomSource rng)
     /// <summary>Adds a random species one body length outside a random edge, heading inward ±30° (spec 5.5).</summary>
     private void SpawnFromEdge()
     {
-        var species = SpeciesCatalog.All[rng.NextInt(SpeciesCatalog.All.Count)];
+        var species = speciesSource.Next();
         var bug = new Bug(nextId++, species, rng.NextInt(int.MaxValue));
 
         float off = species.BodyLength;
