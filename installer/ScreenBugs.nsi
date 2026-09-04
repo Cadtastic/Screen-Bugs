@@ -177,8 +177,87 @@ Function LaunchApp
 FunctionEnd
 
 Section "Install"
+  ; --- Close a running instance, detected through the app's own single-instance mutex.
+  ;     The mutex is session-local, so an elevated installer in the same session still sees
+  ;     it. An instance under a different user is invisible here and will instead lock the
+  ;     files, which NSIS's standard retry prompt covers.
+  System::Call 'kernel32::OpenMutex(i 0x00100000, i 0, t "${MUTEX_NAME}") p .r0'
+  ${If} $0 <> 0
+    System::Call 'kernel32::CloseHandle(p r0)'
+    ${IfNot} ${Silent}
+      MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION \
+        "Screen Bugs is running and must be closed to continue." IDOK +2
+      Abort "Installation cancelled: Screen Bugs is still running."
+    ${EndIf}
+    ; /F denies the app its OnExit, which is harmless: settings are saved when the Options
+    ; dialog is accepted, not at exit, and SingleInstanceGuard treats an abandoned mutex as
+    ; a free slot.
+    nsExec::ExecToStack 'taskkill /F /IM ScreenBugs.exe'
+    Pop $0
+    Pop $1
+    Sleep 500
+  ${EndIf}
+
+  ; --- A prior install somewhere else: remove it so the machine cannot end up with two
+  ;     copies. _?= keeps the uninstaller from relocating itself to $TEMP, which is what
+  ;     makes ExecWait actually wait; it also stops it deleting its own file, hence the two
+  ;     lines after. /UPGRADE=1 keeps the user's Run value, which only the app can re-point.
+  StrCpy $R0 ""
+  ReadRegStr $R0 HKLM "${UNINSTALL_KEY}" "InstallLocation"
+  ${If} $R0 == ""
+    ReadRegStr $R0 HKCU "${UNINSTALL_KEY}" "InstallLocation"
+  ${EndIf}
+  ${If} $R0 != ""
+  ${AndIf} $R0 != "$INSTDIR"
+  ${AndIf} ${FileExists} "$R0\Uninstall.exe"
+    DetailPrint "Removing the previous installation in $R0..."
+    ExecWait '"$R0\Uninstall.exe" /S /UPGRADE=1 _?=$R0'
+    Delete "$R0\Uninstall.exe"
+    RMDir "$R0"
+  ${EndIf}
+
+  ; --- Files
   SetOutPath "$INSTDIR"
+  File /r "${PUBLISH_DIR}\*"
+
+  ; --- The seed (spec 2.3). One slot at speed 1, 60 fps: install time offers no control
+  ;     over slot count, per-slot speed, frame rate or type-change behaviour.
+  DetailPrint "Writing install-defaults.json..."
+  FileOpen $0 "$INSTDIR\install-defaults.json" w
+  FileWrite $0 '{$\r$\n'
+  FileWrite $0 '  "TypeSlots": [ { "Type": "$BugType", "Speed": 1 } ],$\r$\n'
+  FileWrite $0 '  "BugCount": $BugCount,$\r$\n'
+  FileWrite $0 '  "FrameRate": 60,$\r$\n'
+  FileWrite $0 '  "OnTypeChange": "RespawnAll",$\r$\n'
+  ${If} $Startup == "1"
+    FileWrite $0 '  "StartAtLogin": true$\r$\n'
+  ${Else}
+    FileWrite $0 '  "StartAtLogin": false$\r$\n'
+  ${EndIf}
+  FileWrite $0 '}$\r$\n'
+  FileClose $0
+
+  ; --- Shortcuts. Start Menu always; desktop opt-in, because Screen Bugs lives in the tray
+  ;     and is rarely relaunched by hand.
+  CreateShortcut "$SMPROGRAMS\Screen Bugs.lnk" "$INSTDIR\ScreenBugs.exe"
+  ${If} $DesktopShortcut == "1"
+    CreateShortcut "$DESKTOP\Screen Bugs.lnk" "$INSTDIR\ScreenBugs.exe"
+  ${EndIf}
+
+  ; --- Uninstaller and Add/Remove Programs. InstallLocation is also what the
+  ;     MULTIUSER_INSTALLMODE_*_REGISTRY_* defines read back on the next upgrade.
   WriteUninstaller "$INSTDIR\Uninstall.exe"
+  ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
+  WriteRegStr SHCTX "${UNINSTALL_KEY}" "DisplayName" "Screen Bugs"
+  WriteRegStr SHCTX "${UNINSTALL_KEY}" "DisplayVersion" "${VERSION}"
+  WriteRegStr SHCTX "${UNINSTALL_KEY}" "Publisher" "Addam Boord"
+  WriteRegStr SHCTX "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\ScreenBugs.exe,0"
+  WriteRegStr SHCTX "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
+  WriteRegStr SHCTX "${UNINSTALL_KEY}" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S'
+  WriteRegStr SHCTX "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
+  WriteRegDWORD SHCTX "${UNINSTALL_KEY}" "EstimatedSize" "$0"
+  WriteRegDWORD SHCTX "${UNINSTALL_KEY}" "NoModify" 1
+  WriteRegDWORD SHCTX "${UNINSTALL_KEY}" "NoRepair" 1
 SectionEnd
 
 Section "Uninstall"
