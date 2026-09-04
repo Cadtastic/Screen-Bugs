@@ -19,6 +19,12 @@ public sealed class Bug(int id, BugSpecies species, int seed)
     /// <summary>Multiplies walk and flee speed; in [0.85, 1.15] and fixed by <see cref="Seed"/>.</summary>
     public float SpeedFactor { get; } = 0.85f + 0.30f * new Random(seed).NextSingle();
 
+    /// <summary>
+    /// Which options row this bug spawned from, so it follows that row's speed slider. Negative
+    /// for bugs placed directly by tests, which then run at the default speed.
+    /// </summary>
+    public int SlotIndex { get; internal set; } = -1;
+
     public Vector2 Position { get; internal set; }
 
     /// <summary>Radians; 0 points right (+X), positive turns clockwise on screen (Y is down).</summary>

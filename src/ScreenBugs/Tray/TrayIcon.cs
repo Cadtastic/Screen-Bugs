@@ -3,47 +3,37 @@ using System.Windows.Forms;
 namespace ScreenBugs.Tray;
 
 /// <summary>
-/// System tray icon with Pause/Resume, a Bugs count submenu, and Exit.
+/// System tray icon with Pause/Resume, Options and Exit.
 /// Inside this file <c>Application</c> means the WinForms one, which is why the
 /// <c>ThreadException</c> plumbing lives here rather than in <c>App</c>.
 /// </summary>
 public sealed class TrayIcon : IDisposable
 {
-    private static readonly int[] CountChoices = [1, 3, 5, 10];
-
     private readonly NotifyIcon notifyIcon;
     private readonly ContextMenuStrip menu;
     private readonly ToolStripMenuItem pauseItem;
-    private readonly ToolStripMenuItem[] countItems;
 
     public event Action? PauseToggled;
 
-    public event Action<int>? BugCountChanged;
+    public event Action? OptionsRequested;
 
     public event Action? ExitRequested;
 
     // Explicit constructor: it wires WinForms components and handlers that need `this`.
-    public TrayIcon(int initialCount)
+    public TrayIcon()
     {
         pauseItem = new ToolStripMenuItem("Pause");
         pauseItem.Click += (_, _) => PauseToggled?.Invoke();
 
-        countItems = CountChoices
-            .Select(count => new ToolStripMenuItem(count.ToString()) { Checked = count == initialCount, Tag = count })
-            .ToArray();
-        var bugsMenu = new ToolStripMenuItem("Bugs");
-        foreach (var item in countItems)
-        {
-            item.Click += (_, _) => SelectCount(item);
-            bugsMenu.DropDownItems.Add(item);
-        }
+        var optionsItem = new ToolStripMenuItem("Options...");
+        optionsItem.Click += (_, _) => OptionsRequested?.Invoke();
 
         var exitItem = new ToolStripMenuItem("Exit");
         exitItem.Click += (_, _) => ExitRequested?.Invoke();
 
         menu = new ContextMenuStrip();
         menu.Items.Add(pauseItem);
-        menu.Items.Add(bugsMenu);
+        menu.Items.Add(optionsItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(exitItem);
         menu.Opening += (_, _) => IsMenuOpen = true;
@@ -56,6 +46,7 @@ public sealed class TrayIcon : IDisposable
             ContextMenuStrip = menu,
             Visible = true,
         };
+        notifyIcon.DoubleClick += (_, _) => OptionsRequested?.Invoke();
     }
 
     /// <summary>
@@ -84,15 +75,5 @@ public sealed class TrayIcon : IDisposable
         notifyIcon.Visible = false;
         notifyIcon.Dispose();
         menu.Dispose();
-    }
-
-    private void SelectCount(ToolStripMenuItem selected)
-    {
-        foreach (var item in countItems)
-        {
-            item.Checked = item == selected;
-        }
-
-        BugCountChanged?.Invoke((int)selected.Tag!);
     }
 }

@@ -3,7 +3,7 @@ using System.Numerics;
 namespace ScreenBugs.Core.Simulation;
 
 /// <summary>Owns the bugs and steps their behavior (spec section 5). Pure C#; no UI dependencies.</summary>
-public sealed class BugSimulation(Bounds bounds, IRandomSource rng)
+public sealed class BugSimulation(Bounds bounds, IRandomSource rng, ISpeciesSource speciesSource)
 {
     private const float MaxDt = 0.1f;
     private const float SquashDuration = 1.5f;
@@ -55,8 +55,11 @@ public sealed class BugSimulation(Bounds bounds, IRandomSource rng)
 
     private int AliveCount => bugs.Count(b => b.IsAlive);
 
-    /// <summary>Places a wandering bug exactly where asked. Exists for tests; the app never calls it (spec 5.1).</summary>
-    public Bug AddBug(BugSpecies species, Vector2 position, float heading)
+    /// <summary>
+    /// Places a wandering bug exactly where asked. Exists for tests; the app never calls it.
+    /// <paramref name="slotIndex"/> defaults to none, so the bug runs at the default speed.
+    /// </summary>
+    public Bug AddBug(BugSpecies species, Vector2 position, float heading, int slotIndex = -1)
     {
         var bug = new Bug(nextId++, species, rng.NextInt(int.MaxValue))
         {
@@ -65,11 +68,19 @@ public sealed class BugSimulation(Bounds bounds, IRandomSource rng)
             TargetHeading = heading,
             HasEnteredScreen = bounds.Contains(position),
             RetargetTimer = rng.NextFloat(1f, 4f),
+            SlotIndex = slotIndex,
         };
-        bug.Speed = species.WalkSpeed * bug.SpeedFactor;
+        bug.Speed = SpeedOf(bug, species.WalkSpeed);
         bugs.Add(bug);
         return bug;
     }
+
+    /// <summary>
+    /// A bug's current speed: the species figure, its own small variation, and its options row's
+    /// multiplier, which is read live so a slider drag reaches bugs already on screen.
+    /// </summary>
+    private float SpeedOf(Bug bug, float baseSpeed) =>
+        baseSpeed * bug.SpeedFactor * speciesSource.SpeedFor(bug.SlotIndex);
 
     /// <summary>The nearest alive bug whose hit disc contains <paramref name="point"/>, or null.</summary>
     public Bug? HitTest(Vector2 point)
@@ -104,6 +115,20 @@ public sealed class BugSimulation(Bounds bounds, IRandomSource rng)
 
         EnterState(bug, BugState.Squashed);
         return true;
+    }
+
+    /// <summary>
+    /// Removes every alive bug and walks a fresh population in from the edges. Squashed bugs are
+    /// left to finish fading. Used when the selected bug types change.
+    /// </summary>
+    public void RespawnAll()
+    {
+        bugs.RemoveAll(bug => bug.IsAlive);
+        respawnTimer = null;
+        while (AliveCount < targetCount)
+        {
+            SpawnFromEdge();
+        }
     }
 
     /// <summary>Advances the world by <paramref name="dt"/> seconds (clamped to 0.1). <paramref name="cursor"/> is null when unknown.</summary>
@@ -209,7 +234,7 @@ public sealed class BugSimulation(Bounds bounds, IRandomSource rng)
 
     private void UpdateFleeing(Bug bug, float dt, Vector2? cursor)
     {
-        bug.Speed = bug.Species.FleeSpeed * bug.SpeedFactor;
+        bug.Speed = SpeedOf(bug, bug.Species.FleeSpeed);
 
         if (bug.FleeJitterTimer <= 0f)
         {
@@ -236,7 +261,7 @@ public sealed class BugSimulation(Bounds bounds, IRandomSource rng)
         }
 
         bug.Heading += rng.NextFloat(-HeadingNoise, HeadingNoise) * dt;
-        bug.Speed = bug.Species.WalkSpeed * bug.SpeedFactor;
+        bug.Speed = SpeedOf(bug, bug.Species.WalkSpeed);
 
         if (rng.NextFloat() < bug.Species.PauseChancePerSecond * dt)
         {
@@ -416,8 +441,9 @@ public sealed class BugSimulation(Bounds bounds, IRandomSource rng)
     /// <summary>Adds a random species one body length outside a random edge, heading inward ±30° (spec 5.5).</summary>
     private void SpawnFromEdge()
     {
-        var species = SpeciesCatalog.All[rng.NextInt(SpeciesCatalog.All.Count)];
-        var bug = new Bug(nextId++, species, rng.NextInt(int.MaxValue));
+        var choice = speciesSource.Next();
+        var species = choice.Species;
+        var bug = new Bug(nextId++, species, rng.NextInt(int.MaxValue)) { SlotIndex = choice.SlotIndex };
 
         float off = species.BodyLength;
         float along = rng.NextFloat();
@@ -448,7 +474,7 @@ public sealed class BugSimulation(Bounds bounds, IRandomSource rng)
         bug.Heading = inwardHeading + rng.NextFloat(-MathF.PI / 6f, MathF.PI / 6f);
         bug.TargetHeading = bug.Heading;
         bug.RetargetTimer = rng.NextFloat(1f, 4f);
-        bug.Speed = species.WalkSpeed * bug.SpeedFactor;
+        bug.Speed = SpeedOf(bug, species.WalkSpeed);
         bugs.Add(bug);
     }
 }

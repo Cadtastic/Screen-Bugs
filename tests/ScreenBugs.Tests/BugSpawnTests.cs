@@ -139,4 +139,39 @@ public sealed class BugSpawnTests
         Assert.Single(sim.Bugs);
         Assert.NotSame(straggler, sim.Bugs[0]);
     }
+
+    [Fact]
+    public void RespawnAll_replaces_every_alive_bug_and_clears_the_respawn_timer()
+    {
+        var sim = SimulationSteps.Create(3);
+        sim.TrySquashAt(sim.Bugs[0].Position);
+        sim.Step(SimulationSteps.Dt, null);
+        Assert.NotNull(sim.RespawnTimer);
+        int maxIdBefore = sim.Bugs.Max(b => b.Id);
+        var squashed = sim.Bugs.Single(b => !b.IsAlive);
+
+        sim.RespawnAll();
+
+        Assert.Equal(3, SimulationSteps.AliveCount(sim));
+        Assert.All(sim.Bugs.Where(b => b.IsAlive), b => Assert.True(b.Id > maxIdBefore));
+        Assert.Contains(squashed, sim.Bugs);
+        Assert.Null(sim.RespawnTimer);
+    }
+
+    [Fact]
+    public void RespawnAll_brings_the_new_bugs_in_from_the_edges()
+    {
+        var sim = SimulationSteps.Create(4);
+        SimulationSteps.StepFor(sim, 3f);
+
+        sim.RespawnAll();
+
+        foreach (var bug in sim.Bugs.Where(b => b.IsAlive))
+        {
+            Assert.False(SimulationSteps.Screen.Contains(bug.Position));
+            Assert.False(bug.HasEnteredScreen);
+            var toCenter = SimulationSteps.Screen.Center - bug.Position;
+            Assert.True(Vector2.Dot(SimulationSteps.Direction(bug.Heading), toCenter) > 0f);
+        }
+    }
 }

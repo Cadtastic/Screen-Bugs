@@ -10,8 +10,12 @@ internal static class SimulationSteps
     public static readonly BugSpecies Walker =
         SpeciesCatalog.Get(SpeciesId.BlackGardenAnt) with { PauseChancePerSecond = 0f };
 
-    public static BugSimulation Create(int count, int seed = 1234) =>
-        new(Screen, new SystemRandomSource(seed)) { TargetCount = count };
+    public static BugSimulation Create(int count, int seed = 1234)
+    {
+        // A default SlotSpeciesSource holds one Random slot, reproducing the pre-options uniform choice.
+        var rng = new SystemRandomSource(seed);
+        return new BugSimulation(Screen, rng, new SlotSpeciesSource(rng)) { TargetCount = count };
+    }
 
     /// <summary>Steps the simulation at 60 Hz for at least <paramref name="seconds"/>.</summary>
     public static void StepFor(BugSimulation sim, float seconds, Vector2? cursor = null)
