@@ -58,18 +58,26 @@ public static class StartupRegistration
                 return;
             }
 
-            using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true);
-            if (key?.GetValue(ValueName) is not string existing)
+            // Read-only first: most launches find nothing to repair, and asking for a writable
+            // handle on every launch means this throws every launch where policy denies write
+            // access to the key, instead of only on the launch that actually needs to rewrite it.
+            using (var readKey = Registry.CurrentUser.OpenSubKey(RunKeyPath))
             {
-                return;
+                if (readKey?.GetValue(ValueName) is not string existing)
+                {
+                    return;
+                }
+
+                // SetEnabled writes the path quoted, so the quotes come off before comparing:
+                // against the raw value this would never match and would rewrite on every launch.
+                if (string.Equals(existing.Trim('"'), current, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
             }
 
-            // SetEnabled writes the path quoted, so the quotes come off before comparing:
-            // against the raw value this would never match and would rewrite on every launch.
-            if (!string.Equals(existing.Trim('"'), current, StringComparison.OrdinalIgnoreCase))
-            {
-                key.SetValue(ValueName, $"\"{current}\"");
-            }
+            using var writeKey = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true);
+            writeKey?.SetValue(ValueName, $"\"{current}\"");
         }
         catch (Exception exception)
         {

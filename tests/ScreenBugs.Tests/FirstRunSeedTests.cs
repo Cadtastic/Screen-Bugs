@@ -63,4 +63,13 @@ public sealed class FirstRunSeedTests
         Assert.Equal(BugOptions.Default, outcome.Options);
         Assert.Null(outcome.StartAtLogin);
     }
+
+    [Fact]
+    public void An_empty_saved_file_is_still_not_a_first_run()
+    {
+        var outcome = FirstRunSeed.Decide("", Seed);
+
+        Assert.Equal(BugOptions.Default, outcome.Options);
+        Assert.Null(outcome.StartAtLogin);
+    }
 }

@@ -11,6 +11,9 @@ public static class SettingsStore
         "ScreenBugs",
         "settings.json");
 
+    /// <summary>True when the file is there, whether or not it can be read.</summary>
+    public static bool Exists => File.Exists(FilePath);
+
     /// <summary>The file's text, or null when there is no file or it cannot be read.</summary>
     public static string? TryRead()
     {

@@ -13,9 +13,23 @@ public static class SettingsBootstrap
     public static BugOptions Load()
     {
         string? saved = SettingsStore.TryRead();
-        var outcome = FirstRunSeed.Decide(saved, ReadInstallDefaults());
 
-        if (saved is null)
+        // A file that exists but could not be read is not a first run. Seeding over it would
+        // overwrite the user's real settings and re-apply the seed's startup choice on what is
+        // usually a transient failure, so run on defaults this once and leave the disk alone.
+        if (saved is null && SettingsStore.Exists)
+        {
+            StartupRegistration.Refresh();
+            return BugOptions.Default;
+        }
+
+        string? seed = ReadInstallDefaults();
+        var outcome = FirstRunSeed.Decide(saved, seed);
+
+        // Only save (and apply the seed's startup choice) when a seed was actually read: with no
+        // seed there is nothing to remember, and writing defaults here would consume the user's
+        // one first run, so a later install's seed would never be adopted.
+        if (saved is null && seed is not null)
         {
             SettingsStore.Save(outcome.Options);
             if (outcome.StartAtLogin is { } startAtLogin)

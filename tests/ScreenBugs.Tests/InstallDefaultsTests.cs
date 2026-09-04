@@ -60,7 +60,7 @@ public sealed class InstallDefaultsTests
     [Fact]
     public void Random_reads_as_a_random_slot_at_the_default_speed()
     {
-        var defaults = InstallDefaults.Parse("""{"TypeSlots":[{"Type":"Random","Speed":1}]}""");
+        var defaults = InstallDefaults.Parse("""{"TypeSlots":[{"Type":"Random"}]}""");
 
         Assert.Equal([new SlotSetting(BugTypeSlot.Random, SlotSetting.DefaultSpeed)], defaults.Options.TypeSlots);
     }
