@@ -38,13 +38,20 @@ shell. Two rules follow, both verified on this machine:
    Confusingly, `/DASSETS_DIR=C:\...` *does* survive, because a Windows-path value stops the
    conversion — so `/D` appears to work until the first define with a plain value. `-D` is
    immune and means the same thing to makensis.
-2. **Never launch the setup executable with `/S`-style switches from bash.** `/S` arrives as
+2. **Pass makensis an ABSOLUTE path to the script.** `ScreenBugs.nsi` includes its companion
+   with `!include "${__FILEDIR__}\options-page.nsh"`, and `${__FILEDIR__}` keeps whatever
+   relative prefix you invoked with. Compile `installer/ScreenBugs.nsi` and NSIS resolves the
+   include against the script's real directory *as well*, looking for
+   `...\ScreenSavers\installer\installer\options-page.nsh`, and fails. A bare filename with no
+   prefix happens to work, which is why this is easy to miss. Task 10's build script is
+   unaffected: its `Join-Path $repo` already yields an absolute path.
+3. **Never launch the setup executable with `/S`-style switches from bash.** `/S` arrives as
    `S:/` and `/CURRENTUSER` as `C:/Program Files/Git/CURRENTUSER`, so the installer would open
    its GUI and ignore the options. Go through PowerShell, which passes them intact:
 
 ```bash
 MAKENSIS="/c/Program Files (x86)/NSIS/makensis.exe"
-"$MAKENSIS" -V2 "-DASSETS_DIR=C:\Users\AddamBoord\source\repos\ScreenSavers\assets" installer/ScreenBugs.nsi
+"$MAKENSIS" -V2 "-DASSETS_DIR=$REPO\assets" "$REPO\installer\ScreenBugs.nsi"
 
 # Running a built setup with switches:
 pwsh -NoProfile -c "Start-Process -FilePath 'C:\path\to\Setup.exe' ""`
@@ -1207,8 +1214,13 @@ TMPW="C:\Users\ADDAMB~1\AppData\Local\Temp"
 "$MAKENSIS" -V2 "-DVERSION=1.0.0" "-DASSETS_DIR=$REPO\assets" \
   "-DPUBLISH_DIR=$TMPW\sb-payload" \
   "-DOUT_FILE=$TMPW\ScreenBugs-Setup-dev.exe" \
-  installer/ScreenBugs.nsi
+  "$REPO\installer\ScreenBugs.nsi"
 ```
+
+The script path is absolute on purpose. Passing `installer/ScreenBugs.nsi` instead fails with
+`!include: could not find: ...\installer\installer\options-page.nsh`, because `${__FILEDIR__}`
+keeps the relative prefix you invoked with and NSIS then resolves the include against the
+script's real directory too.
 
 ### Task 7: Script skeleton, scope and pages
 
@@ -1594,13 +1606,15 @@ TMPW="C:\Users\ADDAMB~1\AppData\Local\Temp"
 "$MAKENSIS" -V2 "-DVERSION=1.0.0" "-DASSETS_DIR=$REPO\assets" \
   "-DPUBLISH_DIR=$TMPW\sb-payload" \
   "-DOUT_FILE=$TMPW\ScreenBugs-Setup-dev.exe" \
-  installer/ScreenBugs.nsi
+  "$REPO\installer\ScreenBugs.nsi"
 echo "exit: $?"
 ```
 
-Expected: exit 0, no errors. Unused-variable warnings are expected at this stage — `$Upgrade`,
-`$DeleteData` and `$LocalData` are not read until Task 9. An `!error` about a missing define
-means one of the four `-D` arguments was dropped.
+Expected: exit 0, no errors, and in practice no warnings either — NSIS does not warn about
+the `$Upgrade`, `$DeleteData` and `$LocalData` variables that go unread until Task 9. An
+`!error` about a missing define means one of the four `-D` arguments was dropped. At `-V3` the
+summary should report **6 install pages and 2 uninstall pages**; the uninstaller gains its
+third page in Task 9.
 
 - [ ] **Step 4: Check the copyright string survived the encoding**
 
