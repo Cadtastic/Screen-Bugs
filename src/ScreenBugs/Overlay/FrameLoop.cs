@@ -5,11 +5,23 @@ namespace ScreenBugs.Overlay;
 /// <summary>Calls <paramref name="tick"/> with the elapsed seconds, at most 60 times per second, from WPF's rendering callback.</summary>
 public sealed class FrameLoop(Action<float> tick)
 {
-    private const double Interval = 1.0 / 60.0;
-
     private TimeSpan? lastRenderingTime;
     private TimeSpan lastTickTime;
     private double accumulator;
+    private int targetFrameRate = 60;
+
+    /// <summary>Ticks per second: 30, 60 or 120. Setting it clears the accumulator so the next tick is not distorted.</summary>
+    public int TargetFrameRate
+    {
+        get => targetFrameRate;
+        set
+        {
+            targetFrameRate = value;
+            accumulator = 0;
+        }
+    }
+
+    private double Interval => 1.0 / targetFrameRate;
 
     public bool IsRunning { get; private set; }
 

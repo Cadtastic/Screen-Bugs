@@ -34,7 +34,9 @@ public partial class App : Application
         }
 
         var bounds = new Bounds((float)SystemParameters.PrimaryScreenWidth, (float)SystemParameters.PrimaryScreenHeight);
-        var simulation = new BugSimulation(bounds, new SystemRandomSource()) { TargetCount = InitialBugCount };
+        var rng = new SystemRandomSource();
+        var speciesSource = new SlotSpeciesSource(rng);
+        var simulation = new BugSimulation(bounds, rng, speciesSource) { TargetCount = InitialBugCount };
 
         var window = new OverlayWindow();
         window.Surface.Simulation = simulation;
