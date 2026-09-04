@@ -1895,7 +1895,12 @@ warnings, since `$Upgrade`, `$DeleteData` and `$LocalData` are all read now.
 
 - [ ] **Step 5: Round-trip a silent install and uninstall**
 
+The uninstall below deletes `HKCU\...\Run\ScreenBugs` unconditionally, which is correct for a
+real uninstall but will also take a value you set for your own dev build. Save it first:
+
 ```bash
+pwsh -NoProfile -c "(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name ScreenBugs -ErrorAction SilentlyContinue).ScreenBugs | Set-Content \"\$env:TEMPun-value.bak\""
+
 pwsh -NoProfile -c "Start-Process -FilePath \"\$env:TEMP\ScreenBugs-Setup-dev.exe\" -ArgumentList '/S','/CURRENTUSER','/DESKTOP=1','/D=C:\Temp\sb-dev' -Wait"
 ls "/c/Temp/sb-dev/" && ls "$USERPROFILE/Desktop/Screen Bugs.lnk"
 
@@ -1910,7 +1915,21 @@ ls "$USERPROFILE/Desktop/Screen Bugs.lnk" 2>&1
 rm -rf "/c/Temp/sb-dev"
 ```
 
-Expected: after the uninstall, `C:\Temp\sb-dev` holds `Uninstall.exe` and nothing else, `Test-Path` prints `False`, and the desktop shortcut is gone.
+Expected: after the uninstall, `C:\Temp\sb-dev` holds `Uninstall.exe` and nothing else,
+`Test-Path` prints `False`, and the desktop shortcut is gone.
+
+Then put your own `Run` value back:
+
+```bash
+pwsh -NoProfile -c "
+\$backup = \"\$env:TEMPun-value.bak\"
+\$saved = if (Test-Path \$backup) { Get-Content \$backup -Raw } else { \$null }
+if (-not [string]::IsNullOrWhiteSpace(\$saved)) {
+  Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name ScreenBugs -Value \$saved.Trim()
+  'Run value restored'
+} else { 'no Run value to restore' }
+Remove-Item \$backup -ErrorAction SilentlyContinue"
+```
 
 - [ ] **Step 6: Check the uninstaller's page and the data checkbox**
 
@@ -2173,6 +2192,15 @@ if (Test-Path $uninstallKey) {
     throw 'Uninstall your existing per-user Screen Bugs first: this script writes the same registry key and would delete its Add/Remove Programs entry.'
 }
 
+# Every case below ends in an uninstall, and the uninstaller deletes HKCU Run "ScreenBugs"
+# unconditionally -- by design, but it does not know the value belongs to your own dev build
+# rather than to the installation being removed. Save it and put it back at the end.
+$runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$savedRunValue = (Get-ItemProperty $runKey -Name ScreenBugs -ErrorAction SilentlyContinue).ScreenBugs
+if ($savedRunValue) {
+    Write-Host "Saved your Run value; it will be restored at the end." -ForegroundColor DarkGray
+}
+
 $expectedVersion = (dotnet msbuild (Join-Path $repo 'Directory.Build.props') -getProperty:Version -nologo).Trim()
 if ($expectedVersion -notmatch '^\d+\.\d+\.\d+$') {
     throw "Could not read a three-part version from Directory.Build.props (got '$expectedVersion')."
@@ -2282,6 +2310,12 @@ Invoke-Case -Name 'Bad switches fall back to the defaults' `
     -Switches @('/BUGTYPE=Wasp', '/BUGCOUNT=999') `
     -ExpectedSeed @{ Type = 'BlackGardenAnt'; BugCount = 50; StartAtLogin = $true } `
     -ExpectDesktopShortcut $false
+
+# Put the developer's own Run value back, whatever the outcome above.
+if ($savedRunValue) {
+    Set-ItemProperty $runKey -Name ScreenBugs -Value $savedRunValue
+    Write-Host 'Restored your Run value.' -ForegroundColor DarkGray
+}
 
 Write-Host ""
 if ($failures -eq 0) {
