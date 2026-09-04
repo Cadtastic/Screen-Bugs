@@ -28,17 +28,35 @@ dotnet test tests/ScreenBugs.Tests -nologo -v q --no-build -nodeReuse:false
 dotnet build src/ScreenBugs -nologo -v q -nodeReuse:false > /tmp/b.log 2>&1; echo $?; grep -E "error|Error\(s\)" /tmp/b.log
 ```
 
-**makensis.** `C:\Program Files (x86)\NSIS\makensis.exe`. From bash, a `/D` define whose value contains spaces must have the **whole argument** quoted, `/D` prefix included:
+**makensis, and passing switches from bash.** `C:\Program Files (x86)\NSIS\makensis.exe`.
+Git Bash runs under the MSYS2 runtime, which rewrites arguments that look like POSIX paths
+*before* the program sees them, and quoting does not stop it — the rewriting happens below the
+shell. Two rules follow, both verified on this machine:
+
+1. **Use `-D`, never `/D`, for makensis defines.** `"/DVERSION=1.0.0"` arrives as
+   `C:/Program Files/Git/DVERSION=1.0.0` and makensis fails with `Can't open script`.
+   Confusingly, `/DASSETS_DIR=C:\...` *does* survive, because a Windows-path value stops the
+   conversion — so `/D` appears to work until the first define with a plain value. `-D` is
+   immune and means the same thing to makensis.
+2. **Never launch the setup executable with `/S`-style switches from bash.** `/S` arrives as
+   `S:/` and `/CURRENTUSER` as `C:/Program Files/Git/CURRENTUSER`, so the installer would open
+   its GUI and ignore the options. Go through PowerShell, which passes them intact:
 
 ```bash
 MAKENSIS="/c/Program Files (x86)/NSIS/makensis.exe"
-"$MAKENSIS" -V2 "/DASSETS_DIR=C:\Users\AddamBoord\source\repos\ScreenSavers\assets" installer/ScreenBugs.nsi
+"$MAKENSIS" -V2 "-DASSETS_DIR=C:\Users\AddamBoord\source\repos\ScreenSavers\assets" installer/ScreenBugs.nsi
+
+# Running a built setup with switches:
+pwsh -NoProfile -c "Start-Process -FilePath 'C:\path\to\Setup.exe' ""`
+  -ArgumentList '/S','/CURRENTUSER','/BUGCOUNT=12','/D=C:\Temp\sb' -Wait"
 ```
 
 **Starting point:** 92 tests pass on `main`. This plan adds 16 test methods (23 cases with `[Theory]` data), three new C# files in Core, two in the app, one new tool project, two NSIS scripts and two PowerShell scripts.
 
 **Verified before writing this plan** — do not re-litigate these, they were checked by compiling probes on this machine:
 - Every NSIS mechanism used below compiles clean under stock NSIS 3.11, including `MULTIUSER_USE_PROGRAMFILES64`, both `MULTIUSER_INSTALLMODE_*_REGISTRY_*` pairs, `${NSD_CreateAutoUpDown}`, `${NSD_UD_SetRange32}`, `${NSD_CB_GetSelectionIndex}`, `${AtLeastBuild}`, `${GetSize}`, `un.GetOptions`, `SHCTX`, and reading `$MultiUser.Privileges` from a finish-page run function.
+- Passing `-D` defines to makensis works; `/D` is mangled by MSYS2 unless the value happens to
+  be a Windows path, and so are `/S`-style switches to the setup executable (see above).
 - `${__FILEDIR__}` resolves an `!include` against the script's own directory.
 - `Var Desktop` does **not** compile: `$DESKTOP` is a built-in constant. The variable below is `$DesktopShortcut`.
 - `dotnet msbuild Directory.Build.props -getProperty:Version` prints the bare version.
@@ -1157,14 +1175,16 @@ SCRATCH=/tmp/sb-payload
 mkdir -p "$SCRATCH" && echo "placeholder" > "$SCRATCH/ScreenBugs.exe"
 ```
 
-The compile command used throughout this chunk (note the whole-argument quoting for paths with spaces):
+The compile command used throughout this chunk. Note `-D`, not `/D`, per the header — with `/D`
+the `VERSION` define is mangled by MSYS2 and makensis fails with `Can't open script`:
 
 ```bash
 MAKENSIS="/c/Program Files (x86)/NSIS/makensis.exe"
 REPO="C:\Users\AddamBoord\source\repos\ScreenSavers"
-"$MAKENSIS" -V2 "/DVERSION=1.0.0" "/DASSETS_DIR=$REPO\assets" \
-  "/DPUBLISH_DIR=C:\Users\ADDAMB~1\AppData\Local\Temp\sb-payload" \
-  "/DOUT_FILE=C:\Users\ADDAMB~1\AppData\Local\Temp\ScreenBugs-Setup-dev.exe" \
+TMPW="C:\Users\ADDAMB~1\AppData\Local\Temp"
+"$MAKENSIS" -V2 "-DVERSION=1.0.0" "-DASSETS_DIR=$REPO\assets" \
+  "-DPUBLISH_DIR=$TMPW\sb-payload" \
+  "-DOUT_FILE=$TMPW\ScreenBugs-Setup-dev.exe" \
   installer/ScreenBugs.nsi
 ```
 
@@ -1338,7 +1358,19 @@ FunctionEnd
 
 - [ ] **Step 2: Create the main script**
 
-Create `installer/ScreenBugs.nsi`:
+Create `installer/ScreenBugs.nsi`. **Save it as UTF-8 with a BOM.** makensis reads a script as
+ANSI unless it finds one — it announces this as `(ACP)` in its log — and without the BOM the `©`
+in the copyright string reaches the built executable as `Â©`, and the em dash in the options
+page's label is mangled on screen. Step 5 checks both. If your editor writes no BOM:
+
+```bash
+pwsh -NoProfile -c "
+foreach (\$f in 'installer/ScreenBugs.nsi','installer/options-page.nsh') {
+  \$text = Get-Content \$f -Raw
+  [System.IO.File]::WriteAllText((Resolve-Path \$f), \$text, (New-Object System.Text.UTF8Encoding \$true))
+}
+'BOMs written'"
+```
 
 ```nsi
 ; Screen Bugs installer. Built by build/build-installer.ps1, which supplies VERSION,
@@ -1348,7 +1380,7 @@ Create `installer/ScreenBugs.nsi`:
 Unicode true
 
 !ifndef VERSION
-  !error "VERSION must be defined, e.g. makensis /DVERSION=1.0.0"
+  !error "VERSION must be defined, e.g. makensis -DVERSION=1.0.0"
 !endif
 !ifndef ASSETS_DIR
   !error "ASSETS_DIR must be defined: the directory holding ScreenBugs.ico and the wizard bitmaps."
@@ -1439,7 +1471,8 @@ Page custom OptionsPage OptionsPageLeave
 !insertmacro MUI_PAGE_FINISH
 
 !insertmacro MUI_UNPAGE_CONFIRM
-UninstPage custom un.OptionsPage un.OptionsPageLeave
+; The custom uninstall page is inserted here in Task 9, once its functions exist. Referencing
+; them now would fail the compile with: resolving create-page function "un.OptionsPage".
 !insertmacro MUI_UNPAGE_INSTFILES
 
 !insertmacro MUI_LANGUAGE "English"
@@ -1450,10 +1483,20 @@ Function .onInit
   ; 32-bit, so in the default view they resolve under WOW6432Node instead of where the
   ; uninstall key is written, and every all-users upgrade silently falls back to the defaults.
   SetRegView 64
+
+  ; NSIS fills $INSTDIR from /D= before .onInit runs, and MULTIUSER_INIT then overwrites it with
+  ; the per-scope default -- which would make /D= silently do nothing. This script sets no
+  ; InstallDir, so a non-empty $INSTDIR here can only have come from /D=: keep it and put it back.
+  StrCpy $R9 $INSTDIR
   !insertmacro MULTIUSER_INIT
+  ${If} $R9 != ""
+    StrCpy $INSTDIR $R9
+  ${EndIf}
 
   ; Everything below must stay after the macro, which overwrites $INSTDIR and
   ; $MultiUser.InstallMode.
+  ; Spec 5.5 lists these as the install section's first step; here they are, deliberately,
+  ; in .onInit, so an unsupported machine is turned away before the wizard rather than after.
   ${IfNot} ${RunningX64}
     MessageBox MB_OK|MB_ICONSTOP "Screen Bugs requires 64-bit Windows."
     Abort
@@ -1525,24 +1568,37 @@ SectionEnd
 ```bash
 MAKENSIS="/c/Program Files (x86)/NSIS/makensis.exe"
 REPO="C:\Users\AddamBoord\source\repos\ScreenSavers"
-"$MAKENSIS" -V2 "/DVERSION=1.0.0" "/DASSETS_DIR=$REPO\assets" \
-  "/DPUBLISH_DIR=C:\Users\ADDAMB~1\AppData\Local\Temp\sb-payload" \
-  "/DOUT_FILE=C:\Users\ADDAMB~1\AppData\Local\Temp\ScreenBugs-Setup-dev.exe" \
+TMPW="C:\Users\ADDAMB~1\AppData\Local\Temp"
+"$MAKENSIS" -V2 "-DVERSION=1.0.0" "-DASSETS_DIR=$REPO\assets" \
+  "-DPUBLISH_DIR=$TMPW\sb-payload" \
+  "-DOUT_FILE=$TMPW\ScreenBugs-Setup-dev.exe" \
   installer/ScreenBugs.nsi
 echo "exit: $?"
 ```
 
-Expected: exit 0, no errors. A `7998: ... uninstall section` or unused-variable warning is acceptable at this stage; an `!error` about a missing define means one of the four `/D` arguments was dropped.
+Expected: exit 0, no errors. Unused-variable warnings are expected at this stage — `$Upgrade`,
+`$DeleteData` and `$LocalData` are not read until Task 9. An `!error` about a missing define
+means one of the four `-D` arguments was dropped.
 
-- [ ] **Step 4: Click through the wizard**
+- [ ] **Step 4: Check the copyright string survived the encoding**
 
 ```bash
-"C:\Users\ADDAMB~1\AppData\Local\Temp\ScreenBugs-Setup-dev.exe"
+pwsh -NoProfile -c "(Get-Item \"\$env:TEMP\ScreenBugs-Setup-dev.exe\").VersionInfo.LegalCopyright"
 ```
 
-This installs the placeholder payload, so install it somewhere disposable — take the current-user option and set the directory to `C:\Temp\sb-dev`. Confirm: the ant appears on the welcome panel and in the page headers; the mode page offers both scopes; the options page shows the droplist defaulting to Black garden ant, the spinner at 5 with working arrows that refuse to pass 1 or 50, both checkboxes with startup checked, and the note; the finish page shows a checked "Run Screen Bugs". Untick it before finishing, then delete `C:\Temp\sb-dev`.
+Expected: `Copyright © 2026 Addam Boord`. If it reads `Copyright Â© 2026 Addam Boord`, the script
+has no UTF-8 BOM — redo Step 2's BOM command and recompile.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Click through the wizard**
+
+```bash
+pwsh -NoProfile -c "Start-Process -FilePath \"\$env:TEMP\ScreenBugs-Setup-dev.exe\" -Wait"
+```
+
+This installs the placeholder payload, so install it somewhere disposable — take the current-user option and set the directory to `C:\Temp\sb-dev`. Confirm: the ant appears on the welcome panel and in the page headers; the mode page offers both scopes; the options page shows the droplist defaulting to Black garden ant, the spinner at 5 with working arrows that refuse to pass 1 or 50, both checkboxes with startup checked, and the note (its em dash must render as a dash, not `â€”`); the finish page shows a checked
+"Run Screen Bugs". Untick it before finishing, then delete `C:\Temp\sb-dev`.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add installer/
@@ -1621,7 +1677,7 @@ Section "Install"
 
   ; --- Files
   SetOutPath "$INSTDIR"
-  File /r "${PUBLISH_DIR}\*.*"
+  File /r "${PUBLISH_DIR}\*"
 
   ; --- The seed (spec 2.3). One slot at speed 1, 60 fps: install time offers no control
   ;     over slot count, per-slot speed, frame rate or type-change behaviour.
@@ -1672,9 +1728,11 @@ Expected: exit 0. If `File /r` reports "no files found", the scratch payload dir
 
 - [ ] **Step 3: Install silently and check the seed**
 
+Through PowerShell, per the header: from bash `/S` arrives as `S:/` and the installer would
+open its GUI instead.
+
 ```bash
-DEV="C:\Users\ADDAMB~1\AppData\Local\Temp\ScreenBugs-Setup-dev.exe"
-"$DEV" /S /CURRENTUSER /BUGTYPE=HouseSpider /BUGCOUNT=12 /STARTUP=0 /DESKTOP=1 /D=C:\Temp\sb-dev
+pwsh -NoProfile -c "Start-Process -FilePath \"\$env:TEMP\ScreenBugs-Setup-dev.exe\" -ArgumentList '/S','/CURRENTUSER','/BUGTYPE=HouseSpider','/BUGCOUNT=12','/STARTUP=0','/DESKTOP=1','/D=C:\Temp\sb-dev' -Wait"
 cat "/c/Temp/sb-dev/install-defaults.json"
 ```
 
@@ -1693,12 +1751,19 @@ Expected exactly:
 Then confirm the switch validation and the registry:
 
 ```bash
-"$DEV" /S /CURRENTUSER /BUGTYPE=Wasp /BUGCOUNT=999 /D=C:\Temp\sb-dev2
+pwsh -NoProfile -c "Start-Process -FilePath \"\$env:TEMP\ScreenBugs-Setup-dev.exe\" -ArgumentList '/S','/CURRENTUSER','/BUGTYPE=Wasp','/BUGCOUNT=999','/D=C:\Temp\sb-dev2' -Wait"
 grep -E "Type|BugCount|StartAtLogin" "/c/Temp/sb-dev2/install-defaults.json"
 pwsh -NoProfile -c "Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ScreenBugs' | Format-List DisplayName,DisplayVersion,Publisher,InstallLocation,QuietUninstallString,EstimatedSize"
 ```
 
-Expected: `BlackGardenAnt` (unknown type fell back), `"BugCount": 50` (clamped), `"StartAtLogin": true` (the default), and every Add/Remove Programs value populated with `DisplayVersion` `1.0.0`.
+Expected: `BlackGardenAnt` (unknown type fell back), `"BugCount": 50` (clamped),
+`"StartAtLogin": true` (the default), and every Add/Remove Programs value populated with
+`DisplayVersion` `1.0.0`.
+
+Check `InstallLocation` reads back as `C:\Temp\sb-dev2` specifically. If it names
+`%LocalAppData%\Programs\ScreenBugs` instead, `/D=` was ignored — Task 7's `$R9` save and restore
+around `${MULTIUSER_INIT}` is missing, and every later step that installs to a temporary
+directory, `verify-install.ps1` included, would silently target the production location.
 
 - [ ] **Step 4: Clean up the dev installs**
 
@@ -1767,7 +1832,18 @@ Function un.OptionsPageLeave
 FunctionEnd
 ```
 
-- [ ] **Step 2: Replace the uninstall section**
+- [ ] **Step 2: Insert the page**
+
+In `installer/ScreenBugs.nsi`, replace the placeholder comment left in Task 7 with the page
+itself, so the uninstaller runs Confirm, then this, then the progress page:
+
+```nsi
+!insertmacro MUI_UNPAGE_CONFIRM
+UninstPage custom un.OptionsPage un.OptionsPageLeave
+!insertmacro MUI_UNPAGE_INSTFILES
+```
+
+- [ ] **Step 3: Replace the uninstall section**
 
 In `installer/ScreenBugs.nsi`, replace the placeholder `Section "Uninstall" ... SectionEnd` with:
 
@@ -1812,15 +1888,15 @@ Section "Uninstall"
 SectionEnd
 ```
 
-- [ ] **Step 3: Compile**
+- [ ] **Step 4: Compile**
 
-Same command as Task 7 Step 3. Expected: exit 0.
+Same command as the chunk preamble. Expected: exit 0, and this time with no unused-variable
+warnings, since `$Upgrade`, `$DeleteData` and `$LocalData` are all read now.
 
-- [ ] **Step 4: Round-trip a silent install and uninstall**
+- [ ] **Step 5: Round-trip a silent install and uninstall**
 
 ```bash
-DEV="C:\Users\ADDAMB~1\AppData\Local\Temp\ScreenBugs-Setup-dev.exe"
-"$DEV" /S /CURRENTUSER /DESKTOP=1 /D=C:\Temp\sb-dev
+pwsh -NoProfile -c "Start-Process -FilePath \"\$env:TEMP\ScreenBugs-Setup-dev.exe\" -ArgumentList '/S','/CURRENTUSER','/DESKTOP=1','/D=C:\Temp\sb-dev' -Wait"
 ls "/c/Temp/sb-dev/" && ls "$USERPROFILE/Desktop/Screen Bugs.lnk"
 
 # _?= is required: without it the launched process relocates itself to $TEMP and returns
@@ -1836,17 +1912,17 @@ rm -rf "/c/Temp/sb-dev"
 
 Expected: after the uninstall, `C:\Temp\sb-dev` holds `Uninstall.exe` and nothing else, `Test-Path` prints `False`, and the desktop shortcut is gone.
 
-- [ ] **Step 5: Check the uninstaller's page and the data checkbox**
+- [ ] **Step 6: Check the uninstaller's page and the data checkbox**
 
 ```bash
-"$DEV" /S /CURRENTUSER /D=C:\Temp\sb-dev
+pwsh -NoProfile -c "Start-Process -FilePath \"\$env:TEMP\ScreenBugs-Setup-dev.exe\" -ArgumentList '/S','/CURRENTUSER','/D=C:\Temp\sb-dev' -Wait"
 mkdir -p "$LOCALAPPDATA/ScreenBugs" && echo "probe" > "$LOCALAPPDATA/ScreenBugs/probe.txt"
-"C:\Temp\sb-dev\Uninstall.exe"
+pwsh -NoProfile -c "Start-Process -FilePath 'C:\Temp\sb-dev\Uninstall.exe' -Wait"
 ```
 
 Tick "Also delete my Screen Bugs settings" and finish. Confirm `%LocalAppData%\ScreenBugs` is gone — including your own `settings.json`, so back it up first if you care about it. Then repeat without ticking and confirm the folder survives.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add installer/
@@ -1903,6 +1979,11 @@ function Invoke-Step {
     param([string] $Name, [scriptblock] $Action)
 
     Write-Host "==> $Name" -ForegroundColor Cyan
+
+    # Reset first: under Set-StrictMode -Version Latest, reading $LASTEXITCODE when nothing has
+    # set it is a terminating error, so a step whose action runs no native command would fail
+    # here rather than at whatever actually went wrong.
+    $global:LASTEXITCODE = 0
     & $Action
     if ($LASTEXITCODE -ne 0) {
         throw "$Name failed with exit code $LASTEXITCODE."
@@ -1953,10 +2034,10 @@ if ($version -notmatch '^\d+\.\d+\.\d+$') {
 $output = Join-Path $repo "build/ScreenBugs-Setup-$version.exe"
 Invoke-Step "Compiling installer $version" {
     & $makensis -V2 `
-        "/DVERSION=$version" `
-        "/DASSETS_DIR=$assets" `
-        "/DPUBLISH_DIR=$publish" `
-        "/DOUT_FILE=$output" `
+        "-DVERSION=$version" `
+        "-DASSETS_DIR=$assets" `
+        "-DPUBLISH_DIR=$publish" `
+        "-DOUT_FILE=$output" `
         (Join-Path $repo 'installer/ScreenBugs.nsi')
 }
 
@@ -2029,8 +2110,13 @@ Two safety rules it must honour. It installs **per-user into a temporary directo
 
 The script refuses to run while a per-user install exists, which is the point. Remove it through Add/Remove Programs, or:
 
+The stored `UninstallString` includes its own quotes, so `&` would treat the whole quoted
+string as a command name and fail. Trim them:
+
 ```bash
-pwsh -NoProfile -c "& (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ScreenBugs').UninstallString"
+pwsh -NoProfile -c "
+\$path = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ScreenBugs').UninstallString.Trim('\"')
+Start-Process -FilePath \$path -Wait"
 ```
 
 - [ ] **Step 2: Write the script**
@@ -2088,6 +2174,14 @@ if (Test-Path $uninstallKey) {
 }
 
 $expectedVersion = (dotnet msbuild (Join-Path $repo 'Directory.Build.props') -getProperty:Version -nologo).Trim()
+if ($expectedVersion -notmatch '^\d+\.\d+\.\d+$') {
+    throw "Could not read a three-part version from Directory.Build.props (got '$expectedVersion')."
+}
+
+# Start-Process quotes any argument containing a space, which would break the /D= rule below.
+if ([System.IO.Path]::GetTempPath() -match ' ') {
+    throw 'The temp path contains a space, which Start-Process would quote and /D= cannot accept. Set TEMP to a path without spaces and re-run.'
+}
 
 function Invoke-Case {
     param(
@@ -2154,7 +2248,14 @@ function Invoke-Case {
         # _?= also stops the uninstaller deleting its own file, so this is the expected end state.
         Test-Claim 'ScreenBugs.exe is gone' (-not (Test-Path (Join-Path $target 'ScreenBugs.exe')))
         Test-Claim 'install-defaults.json is gone' (-not (Test-Path $seedPath))
-        $left = if (Test-Path $target) { (Get-ChildItem $target -Recurse -File).Name } else { @() }
+        # Read the names through the pipeline, not as a property of the collection. Two traps
+        # this avoids, both of which bite on the *expected* outcomes: `(Get-ChildItem ...).Name`
+        # on an empty or missing directory accesses a property of $null, which throws
+        # PropertyNotFoundException under Set-StrictMode and is fatal here because
+        # $ErrorActionPreference is Stop; and with exactly one file left -- the documented
+        # success state -- an unwrapped result is a String, so .Count throws and $left[0] would
+        # be the character 'U'. ForEach-Object runs per emitted item, so neither can happen.
+        $left = @(Get-ChildItem $target -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
         Test-Claim 'only Uninstall.exe is left behind' (($left.Count -eq 0) -or ($left.Count -eq 1 -and $left[0] -eq 'Uninstall.exe')) "left: $($left -join ', ')"
         Test-Claim 'the uninstall key is gone' (-not (Test-Path $uninstallKey))
         Test-Claim 'the Start Menu shortcut is gone' (-not (Test-Path $startMenu))
@@ -2267,7 +2368,26 @@ With the app running, run setup. It asks, the tray icon disappears, the install 
 
 - [ ] **Step 7: A relocating upgrade keeps the startup choice**
 
-The case `/UPGRADE=1` and `StartupRegistration.Refresh` exist for. Install current-user with startup on, launch once so the `Run` value is written, exit, then install **all-users**. Afterwards: only one Add/Remove Programs entry, the old directory gone, and after launching the new copy the Options dialog still shows startup checked with the `Run` value naming the **new** path.
+The case `/UPGRADE=1` and `StartupRegistration.Refresh` exist for. The precondition matters: the
+user must have **both** a `settings.json` and a `Run` value, so delete the settings file first and
+let the install's startup choice create the value. Skip that and step 4 has already left a
+`settings.json` behind, `FirstRunSeed` takes rule 1, no `Run` value is ever created, and the final
+assertion passes whether or not `/UPGRADE=1` works at all.
+
+```bash
+rm -f "$LOCALAPPDATA/ScreenBugs/settings.json"
+```
+
+Then: install **current-user** with startup checked, launch once (which seeds `settings.json` and
+writes the `Run` value), and exit. Confirm the value exists and names the current-user path:
+
+```bash
+pwsh -NoProfile -c "(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run').ScreenBugs"
+```
+
+Now install **all-users**. Afterwards: only one Add/Remove Programs entry, the old directory
+gone, and after launching the new copy the Options dialog still shows startup checked, with the
+`Run` value naming the **new** Program Files path — re-run the command above to confirm.
 
 - [ ] **Step 8: Uninstall, both ways**
 
@@ -2279,7 +2399,10 @@ The shortcut, taskbar and Add/Remove Programs entries show the ant. The ARP entr
 
 - [ ] **Step 10: Platform guards**
 
-Setup refuses, with a clear message, on 32-bit Windows or a build below 14393. Without such a machine to hand, temporarily invert the two `${IfNot}` guards in `.onInit`, compile, confirm both messages appear, then revert — do not commit the inversion.
+Setup refuses, with a clear message, on 32-bit Windows or a build below 14393. Without such a
+machine to hand, invert the guards in `.onInit` — but **one at a time**: the first to fire calls
+`Abort`, which quits the installer, so inverting both only ever shows the first message. Compile,
+confirm the message, revert, then repeat for the other. Do not commit either inversion.
 
 - [ ] **Step 11: Final full-suite run**
 

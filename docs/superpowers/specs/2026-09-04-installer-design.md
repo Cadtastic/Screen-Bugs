@@ -354,6 +354,11 @@ Includes: `MUI2.nsh`, `MultiUser.nsh`, `nsDialogs.nsh`, `LogicLib.nsh`,
 `FileFunc.nsh`, `WinVer.nsh`, `x64.nsh` — all stock NSIS 3, no third-party
 plugins, so the build needs nothing but a standard NSIS installation.
 
+Both files must be saved as **UTF-8 with a BOM**. makensis reads a script as
+ANSI unless it finds one, and both carry non-ASCII text that the user sees: the
+`©` in the version resource's copyright string, and an em dash in the options
+page's explanatory label.
+
 Compression `SetCompressor /SOLID lzma`, which matters: a self-contained
 ReadyToRun publish is roughly 254 files and 155 MB.
 
@@ -396,7 +401,14 @@ Registry writes use the `SHCTX` root and shortcut paths use `$SMPROGRAMS` and
 
 - `${MULTIUSER_INIT}` overwrites `$INSTDIR` and `$MultiUser.InstallMode`. Any
   `.onInit` code that reads or sets either must run *after* the macro, or it is
-  silently discarded.
+  silently discarded. This has one consequence the switch table below depends
+  on: NSIS fills `$INSTDIR` from `/D=` *before* `.onInit` runs, so the macro
+  overwrites it with the per-scope default and `/D=` silently does nothing.
+  Because the script sets no `InstallDir`, a non-empty `$INSTDIR` on entry can
+  only have come from `/D=` — so it must be saved before the macro and restored
+  after. Without that, `/D=` is not implemented, and the verification script of
+  section 7.2 would install to, assert against and then uninstall the *real*
+  per-user installation instead of a temporary directory.
 - **`SetRegView 64` must run *before* `${MULTIUSER_INIT}`**, which is the one
   exception to the rule above — it touches neither `$INSTDIR` nor
   `$MultiUser.InstallMode`, so it is exempt. The macro itself performs the
@@ -484,7 +496,7 @@ command-line equivalent and the page is skipped under `/S`:
 |---|---|
 | `/S` | silent |
 | `/ALLUSERS`, `/CURRENTUSER` | scope (from `MultiUser`) |
-| `/D=<path>` | install directory (NSIS built-in, must be last) |
+| `/D=<path>` | install directory (NSIS built-in, must be last, and never quoted) |
 | `/BUGTYPE=<name>` | `Random` or a `SpeciesId` name |
 | `/BUGCOUNT=<1-50>` | bug count |
 | `/STARTUP=0\|1` | run at sign-in |
