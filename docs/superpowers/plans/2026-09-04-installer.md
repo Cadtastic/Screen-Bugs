@@ -815,15 +815,37 @@ dotnet msbuild Directory.Build.props -getProperty:Version -nologo
 pwsh -NoProfile -c "(Get-Item src/ScreenBugs/bin/Debug/net10.0-windows/ScreenBugs.exe).VersionInfo | Format-List ProductName,ProductVersion,CompanyName"
 ```
 
-Expected: `0 Error(s)`; `1.0.0`; and the executable reporting ProductName `Screen Bugs`, ProductVersion `1.0.0`, CompanyName `Addam Boord`.
+Expected: `0 Error(s)`; `1.0.0` from msbuild; and the executable reporting ProductName
+`Screen Bugs` and CompanyName `Addam Boord`. ProductVersion reads `1.0.0+<commit sha>` rather
+than a bare `1.0.0` — the SDK appends `SourceRevisionId` to the informational version for any
+build inside a git repo. That is expected and harmless: the installer takes its version from
+`dotnet msbuild -getProperty:Version`, which returns the bare number.
 
 - [ ] **Step 5: Confirm the tray icon still looks right**
+
+**First, a trap this task inherits from Task 3.** `SettingsBootstrap.Load` now calls
+`StartupRegistration.Refresh()` on every launch, which re-points an existing `Run` value whenever
+the running executable's path differs from the stored one. So if you have a `Run` value naming a
+*Release* build and you launch the *Debug* build, that value is silently rewritten to the Debug
+path. Check first, and launch the configuration that matches, or save and restore the value:
+
+```bash
+pwsh -NoProfile -c "(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name ScreenBugs -ErrorAction SilentlyContinue).ScreenBugs"
+```
+
+If that prints nothing, any build is safe to launch. If it names a path, either build and launch
+that same configuration, or back the value up and restore it afterwards as Task 3 Step 6 does.
 
 ```bash
 ./src/ScreenBugs/bin/Debug/net10.0-windows/ScreenBugs.exe &
 ```
 
-The tray icon must be the same ant as before — this step exists because the scale transform is new code in a path that had none. Exit the app afterwards.
+The tray icon must be the same ant as before — this step exists because the scale transform is
+new code in a path that had none. Exit the app afterwards.
+
+If you have no way to see the tray (no screen), say so rather than claiming the check: verify
+instead that the app starts and writes no `%LocalAppData%\ScreenBugs\error.log`, which at least
+proves the new drawing path runs without throwing.
 
 - [ ] **Step 6: Commit**
 
@@ -1899,7 +1921,8 @@ The uninstall below deletes `HKCU\...\Run\ScreenBugs` unconditionally, which is 
 real uninstall but will also take a value you set for your own dev build. Save it first:
 
 ```bash
-pwsh -NoProfile -c "(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name ScreenBugs -ErrorAction SilentlyContinue).ScreenBugs | Set-Content \"\$env:TEMPun-value.bak\""
+pwsh -NoProfile -c "(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name ScreenBugs -ErrorAction SilentlyContinue).ScreenBugs | Set-Content \"\$env:TEMP
+un-value.bak\""
 
 pwsh -NoProfile -c "Start-Process -FilePath \"\$env:TEMP\ScreenBugs-Setup-dev.exe\" -ArgumentList '/S','/CURRENTUSER','/DESKTOP=1','/D=C:\Temp\sb-dev' -Wait"
 ls "/c/Temp/sb-dev/" && ls "$USERPROFILE/Desktop/Screen Bugs.lnk"
@@ -1922,7 +1945,8 @@ Then put your own `Run` value back:
 
 ```bash
 pwsh -NoProfile -c "
-\$backup = \"\$env:TEMPun-value.bak\"
+\$backup = \"\$env:TEMP
+un-value.bak\"
 \$saved = if (Test-Path \$backup) { Get-Content \$backup -Raw } else { \$null }
 if (-not [string]::IsNullOrWhiteSpace(\$saved)) {
   Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name ScreenBugs -Value \$saved.Trim()
