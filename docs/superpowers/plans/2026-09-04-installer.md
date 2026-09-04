@@ -2236,7 +2236,15 @@ if (Test-Path $uninstallKey) {
 # unconditionally -- by design, but it does not know the value belongs to your own dev build
 # rather than to the installation being removed. Save it and put it back at the end.
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-$savedRunValue = (Get-ItemProperty $runKey -Name ScreenBugs -ErrorAction SilentlyContinue).ScreenBugs
+# Read the property off the object only once we know there is one. Where the value does not
+# exist -- a fresh CI runner, or anyone who has never enabled startup -- Get-ItemProperty
+# returns nothing, and reaching through it for .ScreenBugs is a property access on $null,
+# which Set-StrictMode turns into a terminating error.
+$savedRunValue = $null
+$runEntry = Get-ItemProperty $runKey -Name ScreenBugs -ErrorAction SilentlyContinue
+if ($runEntry) {
+    $savedRunValue = $runEntry.ScreenBugs
+}
 if ($savedRunValue) {
     Write-Host "Saved your Run value; it will be restored at the end." -ForegroundColor DarkGray
 }
