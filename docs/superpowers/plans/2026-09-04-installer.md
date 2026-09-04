@@ -2349,6 +2349,15 @@ Invoke-Case -Name 'Bad switches fall back to the defaults' `
     -ExpectedSeed @{ Type = 'BlackGardenAnt'; BugCount = 50; StartAtLogin = $true } `
     -ExpectDesktopShortcut $false
 
+# No option switches at all. This case exists because its absence hid a real bug: NSIS's
+# ${GetOptions} clears its destination variable when the switch is missing, so every default
+# set in .onInit was being overwritten, and a plain install seeded BugCount 1 instead of 5.
+# Every other case here passes at least one switch, so none of them would catch a regression.
+Invoke-Case -Name 'No option switches: the documented defaults' `
+    -Switches @() `
+    -ExpectedSeed @{ Type = 'BlackGardenAnt'; BugCount = 5; StartAtLogin = $true } `
+    -ExpectDesktopShortcut $false
+
 # Put the developer's own Run value back, whatever the outcome above.
 if ($savedRunValue) {
     Set-ItemProperty $runKey -Name ScreenBugs -Value $savedRunValue
