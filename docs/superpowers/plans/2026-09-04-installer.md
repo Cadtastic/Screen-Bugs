@@ -38,13 +38,20 @@ shell. Two rules follow, both verified on this machine:
    Confusingly, `/DASSETS_DIR=C:\...` *does* survive, because a Windows-path value stops the
    conversion — so `/D` appears to work until the first define with a plain value. `-D` is
    immune and means the same thing to makensis.
-2. **Never launch the setup executable with `/S`-style switches from bash.** `/S` arrives as
+2. **Pass makensis an ABSOLUTE path to the script.** `ScreenBugs.nsi` includes its companion
+   with `!include "${__FILEDIR__}\options-page.nsh"`, and `${__FILEDIR__}` keeps whatever
+   relative prefix you invoked with. Compile `installer/ScreenBugs.nsi` and NSIS resolves the
+   include against the script's real directory *as well*, looking for
+   `...\ScreenSavers\installer\installer\options-page.nsh`, and fails. A bare filename with no
+   prefix happens to work, which is why this is easy to miss. Task 10's build script is
+   unaffected: its `Join-Path $repo` already yields an absolute path.
+3. **Never launch the setup executable with `/S`-style switches from bash.** `/S` arrives as
    `S:/` and `/CURRENTUSER` as `C:/Program Files/Git/CURRENTUSER`, so the installer would open
    its GUI and ignore the options. Go through PowerShell, which passes them intact:
 
 ```bash
 MAKENSIS="/c/Program Files (x86)/NSIS/makensis.exe"
-"$MAKENSIS" -V2 "-DASSETS_DIR=C:\Users\AddamBoord\source\repos\ScreenSavers\assets" installer/ScreenBugs.nsi
+"$MAKENSIS" -V2 "-DASSETS_DIR=$REPO\assets" "$REPO\installer\ScreenBugs.nsi"
 
 # Running a built setup with switches:
 pwsh -NoProfile -c "Start-Process -FilePath 'C:\path\to\Setup.exe' ""`
@@ -815,15 +822,37 @@ dotnet msbuild Directory.Build.props -getProperty:Version -nologo
 pwsh -NoProfile -c "(Get-Item src/ScreenBugs/bin/Debug/net10.0-windows/ScreenBugs.exe).VersionInfo | Format-List ProductName,ProductVersion,CompanyName"
 ```
 
-Expected: `0 Error(s)`; `1.0.0`; and the executable reporting ProductName `Screen Bugs`, ProductVersion `1.0.0`, CompanyName `Addam Boord`.
+Expected: `0 Error(s)`; `1.0.0` from msbuild; and the executable reporting ProductName
+`Screen Bugs` and CompanyName `Addam Boord`. ProductVersion reads `1.0.0+<commit sha>` rather
+than a bare `1.0.0` — the SDK appends `SourceRevisionId` to the informational version for any
+build inside a git repo. That is expected and harmless: the installer takes its version from
+`dotnet msbuild -getProperty:Version`, which returns the bare number.
 
 - [ ] **Step 5: Confirm the tray icon still looks right**
+
+**First, a trap this task inherits from Task 3.** `SettingsBootstrap.Load` now calls
+`StartupRegistration.Refresh()` on every launch, which re-points an existing `Run` value whenever
+the running executable's path differs from the stored one. So if you have a `Run` value naming a
+*Release* build and you launch the *Debug* build, that value is silently rewritten to the Debug
+path. Check first, and launch the configuration that matches, or save and restore the value:
+
+```bash
+pwsh -NoProfile -c "(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name ScreenBugs -ErrorAction SilentlyContinue).ScreenBugs"
+```
+
+If that prints nothing, any build is safe to launch. If it names a path, either build and launch
+that same configuration, or back the value up and restore it afterwards as Task 3 Step 6 does.
 
 ```bash
 ./src/ScreenBugs/bin/Debug/net10.0-windows/ScreenBugs.exe &
 ```
 
-The tray icon must be the same ant as before — this step exists because the scale transform is new code in a path that had none. Exit the app afterwards.
+The tray icon must be the same ant as before — this step exists because the scale transform is
+new code in a path that had none. Exit the app afterwards.
+
+If you have no way to see the tray (no screen), say so rather than claiming the check: verify
+instead that the app starts and writes no `%LocalAppData%\ScreenBugs\error.log`, which at least
+proves the new drawing path runs without throwing.
 
 - [ ] **Step 6: Commit**
 
@@ -1185,8 +1214,13 @@ TMPW="C:\Users\ADDAMB~1\AppData\Local\Temp"
 "$MAKENSIS" -V2 "-DVERSION=1.0.0" "-DASSETS_DIR=$REPO\assets" \
   "-DPUBLISH_DIR=$TMPW\sb-payload" \
   "-DOUT_FILE=$TMPW\ScreenBugs-Setup-dev.exe" \
-  installer/ScreenBugs.nsi
+  "$REPO\installer\ScreenBugs.nsi"
 ```
+
+The script path is absolute on purpose. Passing `installer/ScreenBugs.nsi` instead fails with
+`!include: could not find: ...\installer\installer\options-page.nsh`, because `${__FILEDIR__}`
+keeps the relative prefix you invoked with and NSIS then resolves the include against the
+script's real directory too.
 
 ### Task 7: Script skeleton, scope and pages
 
@@ -1572,13 +1606,15 @@ TMPW="C:\Users\ADDAMB~1\AppData\Local\Temp"
 "$MAKENSIS" -V2 "-DVERSION=1.0.0" "-DASSETS_DIR=$REPO\assets" \
   "-DPUBLISH_DIR=$TMPW\sb-payload" \
   "-DOUT_FILE=$TMPW\ScreenBugs-Setup-dev.exe" \
-  installer/ScreenBugs.nsi
+  "$REPO\installer\ScreenBugs.nsi"
 echo "exit: $?"
 ```
 
-Expected: exit 0, no errors. Unused-variable warnings are expected at this stage — `$Upgrade`,
-`$DeleteData` and `$LocalData` are not read until Task 9. An `!error` about a missing define
-means one of the four `-D` arguments was dropped.
+Expected: exit 0, no errors, and in practice no warnings either — NSIS does not warn about
+the `$Upgrade`, `$DeleteData` and `$LocalData` variables that go unread until Task 9. An
+`!error` about a missing define means one of the four `-D` arguments was dropped. At `-V3` the
+summary should report **6 install pages and 2 uninstall pages**; the uninstaller gains its
+third page in Task 9.
 
 - [ ] **Step 4: Check the copyright string survived the encoding**
 
@@ -1899,7 +1935,8 @@ The uninstall below deletes `HKCU\...\Run\ScreenBugs` unconditionally, which is 
 real uninstall but will also take a value you set for your own dev build. Save it first:
 
 ```bash
-pwsh -NoProfile -c "(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name ScreenBugs -ErrorAction SilentlyContinue).ScreenBugs | Set-Content \"\$env:TEMPun-value.bak\""
+pwsh -NoProfile -c "(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name ScreenBugs -ErrorAction SilentlyContinue).ScreenBugs | Set-Content \"\$env:TEMP
+un-value.bak\""
 
 pwsh -NoProfile -c "Start-Process -FilePath \"\$env:TEMP\ScreenBugs-Setup-dev.exe\" -ArgumentList '/S','/CURRENTUSER','/DESKTOP=1','/D=C:\Temp\sb-dev' -Wait"
 ls "/c/Temp/sb-dev/" && ls "$USERPROFILE/Desktop/Screen Bugs.lnk"
@@ -1922,7 +1959,8 @@ Then put your own `Run` value back:
 
 ```bash
 pwsh -NoProfile -c "
-\$backup = \"\$env:TEMPun-value.bak\"
+\$backup = \"\$env:TEMP
+un-value.bak\"
 \$saved = if (Test-Path \$backup) { Get-Content \$backup -Raw } else { \$null }
 if (-not [string]::IsNullOrWhiteSpace(\$saved)) {
   Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name ScreenBugs -Value \$saved.Trim()
@@ -2085,7 +2123,9 @@ This one is slow — a full Release publish plus a solid-LZMA compress of ~155 M
 pwsh -NoProfile -File build/build-installer.ps1
 ```
 
-Expected: `Built .../build/ScreenBugs-Setup-1.0.0.exe`, roughly 60–75 MB, from ~254 published files.
+Expected: `Built .../build/ScreenBugs-Setup-1.0.0.exe`, roughly 45–50 MB, from 254 published
+files totalling ~155 MB. The measured build is 47.7 MB — solid LZMA compresses the
+ReadyToRun payload better than the first estimate assumed.
 
 - [ ] **Step 4: Install the real thing**
 
@@ -2311,6 +2351,15 @@ Invoke-Case -Name 'Bad switches fall back to the defaults' `
     -ExpectedSeed @{ Type = 'BlackGardenAnt'; BugCount = 50; StartAtLogin = $true } `
     -ExpectDesktopShortcut $false
 
+# No option switches at all. This case exists because its absence hid a real bug: NSIS's
+# ${GetOptions} clears its destination variable when the switch is missing, so every default
+# set in .onInit was being overwritten, and a plain install seeded BugCount 1 instead of 5.
+# Every other case here passes at least one switch, so none of them would catch a regression.
+Invoke-Case -Name 'No option switches: the documented defaults' `
+    -Switches @() `
+    -ExpectedSeed @{ Type = 'BlackGardenAnt'; BugCount = 5; StartAtLogin = $true } `
+    -ExpectDesktopShortcut $false
+
 # Put the developer's own Run value back, whatever the outcome above.
 if ($savedRunValue) {
     Set-ItemProperty $runKey -Name ScreenBugs -Value $savedRunValue
@@ -2343,9 +2392,15 @@ git add build/verify-install.ps1
 git commit -m "$(cat <<'EOF'
 test(installer): assert the option plumbing end to end
 
-Drives the real setup silently in three cases and checks the written
+Drives the real setup silently in four cases and checks the written
 seed, the Add/Remove Programs values and the shortcuts, then uninstalls
 and checks the cleanup.
+
+The fourth case passes no option switches at all. That is the
+regression test for ${GetOptions} clearing its destination when a
+switch is absent, which made a plain install seed BugCount 1 instead of
+5; every other case passes at least one switch, so none of them would
+catch it coming back.
 
 Uninstall is run with _?= so the assertions cannot race: without it the
 launched uninstaller relocates itself to $TEMP and returns immediately.

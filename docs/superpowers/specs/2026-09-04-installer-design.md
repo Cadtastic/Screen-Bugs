@@ -153,7 +153,11 @@ Rules, in order:
 2. Otherwise `installDefaultsJson` is not null → `InstallDefaults.Parse` and
    return its options and its three-state `StartAtLogin`.
 3. Otherwise → `(BugOptions.Default, null)`. This is the no-installer case:
-   running from a build output folder behaves exactly as it does today.
+   running from a build output folder behaves exactly as it does today. For that
+   to be true, the caller must also **not save** when there was no seed: writing
+   a defaults-valued `settings.json` would consume the user's one first run, so a
+   later install's seed would be ignored for ever. Saving is therefore gated on a
+   seed having actually been read, not merely on the absence of saved settings.
 
 `StartAtLogin` is a state to *apply*, not a flag to act on when true. That is
 what makes an install with startup switched off actually switch it off, rather
@@ -167,14 +171,24 @@ not carry a "should save" flag, because the caller is the thing that knows.
 
 `SettingsStore.Load()` is superseded and removed — `App.OnStartup` is its only
 caller. It is replaced by a raw read, because the decision now needs to
-distinguish "no file" from "unreadable file":
+distinguish "no file" from "a file whose contents are unusable":
 
 ```csharp
 // src/ScreenBugs/Settings/SettingsStore.cs
 public static string FilePath { get; }          // unchanged
+public static bool Exists { get; }              // the file is there, readable or not
 public static string? TryRead();                // null when absent or unreadable; logs and returns null on error
 public static void Save(BugOptions options);    // unchanged
 ```
+
+`TryRead` alone is not enough, which is why `Exists` exists. It returns null for
+two different situations: there is no file, and there is a file that could not
+be read — an antivirus lock, a denied ACL, an IO error. Treating the second as a
+first run would re-adopt the seed over the user's real settings and re-apply the
+seed's startup choice, losing a preference silently on what is usually a
+transient failure. So `SettingsBootstrap` checks `Exists` when `TryRead` returns
+null, and if the file is there it runs on `BugOptions.Default` for that launch
+and writes nothing.
 
 ```csharp
 // src/ScreenBugs/Settings/SettingsBootstrap.cs

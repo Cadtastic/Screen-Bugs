@@ -3,7 +3,7 @@ using ScreenBugs.Diagnostics;
 
 namespace ScreenBugs.Settings;
 
-/// <summary>Loads and saves the options file beside the crash log. Never throws.</summary>
+/// <summary>Reads and writes the options file beside the crash log. Never throws.</summary>
 public static class SettingsStore
 {
     public static string FilePath { get; } = Path.Combine(
@@ -11,18 +11,20 @@ public static class SettingsStore
         "ScreenBugs",
         "settings.json");
 
-    public static BugOptions Load()
+    /// <summary>True when the file is there, whether or not it can be read.</summary>
+    public static bool Exists => File.Exists(FilePath);
+
+    /// <summary>The file's text, or null when there is no file or it cannot be read.</summary>
+    public static string? TryRead()
     {
         try
         {
-            return File.Exists(FilePath)
-                ? SettingsSerializer.Deserialize(File.ReadAllText(FilePath))
-                : BugOptions.Default;
+            return File.Exists(FilePath) ? File.ReadAllText(FilePath) : null;
         }
         catch (Exception exception)
         {
             CrashLog.Write(exception);
-            return BugOptions.Default;
+            return null;
         }
     }
 
