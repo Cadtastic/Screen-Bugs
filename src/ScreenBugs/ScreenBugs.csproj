@@ -9,6 +9,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <PlatformTarget>x64</PlatformTarget>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\..\assets\ScreenBugs.ico</ApplicationIcon>
     <RootNamespace>ScreenBugs</RootNamespace>
     <AssemblyName>ScreenBugs</AssemblyName>
     <!-- WFAC010: the WinForms analyzer objects to DPI settings in app.manifest; the manifest is the right place for a WPF host. -->
