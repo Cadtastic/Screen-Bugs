@@ -54,9 +54,8 @@ public partial class App : Application
             window.Surface.Redraw();
         });
 
-        trayIcon = new TrayIcon(InitialBugCount);
+        trayIcon = new TrayIcon();
         trayIcon.PauseToggled += TogglePause;
-        trayIcon.BugCountChanged += count => simulation.TargetCount = count;
         trayIcon.ExitRequested += () => Shutdown();
 
         frameLoop.Start();
