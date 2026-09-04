@@ -92,6 +92,20 @@ ScreenBugs.slnx                                    mod   tools/IconGen
 
 The whole install-time-options mechanism, testable with no installer in sight. At the end of this chunk you can drop a hand-written `install-defaults.json` next to a debug build and watch the app adopt it.
 
+### Task 0: Branch
+
+- [ ] **Step 1: Create the branch**
+
+```bash
+git switch -c feat/installer
+git status
+```
+
+Expected: `On branch feat/installer` and a clean tree. If the tree is not clean, stop and deal
+with that first — every task below commits.
+
+---
+
 ### Task 1: The seed record
 
 **Files:**
@@ -262,7 +276,7 @@ dotnet build tests/ScreenBugs.Tests -nologo -v q -nodeReuse:false > /tmp/b.log 2
 dotnet test tests/ScreenBugs.Tests -nologo -v q --no-build -nodeReuse:false
 ```
 
-Expected: `Passed!  - Failed: 0, Passed: 105` (92 existing + 13 cases from the 9 methods).
+Expected: `Passed!  - Failed: 0, Passed: 108` — 92 existing plus 16 cases from these 9 methods (7 `[Fact]` plus a 4-case and a 5-case `[Theory]`).
 
 - [ ] **Step 5: Commit**
 
@@ -429,7 +443,7 @@ dotnet build tests/ScreenBugs.Tests -nologo -v q -nodeReuse:false > /tmp/b.log 2
 dotnet test tests/ScreenBugs.Tests -nologo -v q --no-build -nodeReuse:false
 ```
 
-Expected: `Passed!  - Failed: 0, Passed: 112`.
+Expected: `Passed!  - Failed: 0, Passed: 115` (108 plus these 7).
 
 - [ ] **Step 6: Commit**
 
@@ -597,15 +611,19 @@ dotnet build tests/ScreenBugs.Tests -nologo -v q -nodeReuse:false > /tmp/b.log 2
 dotnet test tests/ScreenBugs.Tests -nologo -v q --no-build -nodeReuse:false
 ```
 
-Expected: both builds `0 Error(s)`, and still `Passed: 112`. If the app build fails with `CS0117: 'SettingsStore' does not contain a definition for 'Load'`, Step 4 was missed.
+Expected: both builds `0 Error(s)`, and still `Passed: 115`. If the app build fails with `CS0117: 'SettingsStore' does not contain a definition for 'Load'`, Step 4 was missed.
 
 - [ ] **Step 6: Smoke-test the seeding by hand**
 
-This is the only end-to-end check of the seed path until the installer exists, and it is worth doing carefully.
+This is the only end-to-end check of the seed path until the installer exists, and it is worth
+doing carefully. Note the seed below sets `"StartAtLogin": false`, which makes the app
+**delete** `HKCU\...\Run\ScreenBugs` — on a machine where you actually use Screen Bugs that is
+your own startup setting, so the commands save and restore both it and `settings.json`.
 
 ```bash
-# Save your real settings out of the way first.
+# Save your real settings and Run value out of the way first.
 mv "$LOCALAPPDATA/ScreenBugs/settings.json" "$LOCALAPPDATA/ScreenBugs/settings.json.bak" 2>/dev/null
+pwsh -NoProfile -c "(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name ScreenBugs -ErrorAction SilentlyContinue).ScreenBugs | Set-Content \"\$env:TEMP\run-value.bak\""
 
 cat > src/ScreenBugs/bin/Debug/net10.0-windows/install-defaults.json <<'JSON'
 {
@@ -634,6 +652,16 @@ Finally, restore your own settings:
 rm src/ScreenBugs/bin/Debug/net10.0-windows/install-defaults.json
 rm "$LOCALAPPDATA/ScreenBugs/settings.json"
 mv "$LOCALAPPDATA/ScreenBugs/settings.json.bak" "$LOCALAPPDATA/ScreenBugs/settings.json" 2>/dev/null
+# IsNullOrWhiteSpace, not .Trim(): with startup previously off the backup is a 0-byte file,
+# Get-Content -Raw returns null, and calling a method on it throws a red error.
+pwsh -NoProfile -c "
+\$backup = \"\$env:TEMP\run-value.bak\"
+\$saved = if (Test-Path \$backup) { Get-Content \$backup -Raw } else { \$null }
+if (-not [string]::IsNullOrWhiteSpace(\$saved)) {
+  Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name ScreenBugs -Value \$saved.Trim()
+  'Run value restored'
+} else { 'no Run value to restore' }
+Remove-Item \$backup -ErrorAction SilentlyContinue"
 ```
 
 - [ ] **Step 7: Commit**
@@ -766,7 +794,7 @@ Create `Directory.Build.props` at the repository root. This is the single versio
 export MSBUILDDISABLENODEREUSE=1
 dotnet build src/ScreenBugs -nologo -v q -nodeReuse:false > /tmp/b.log 2>&1; echo $?; grep -E "error|Error\(s\)" /tmp/b.log
 dotnet msbuild Directory.Build.props -getProperty:Version -nologo
-powershell -c "(Get-Item src/ScreenBugs/bin/Debug/net10.0-windows/ScreenBugs.exe).VersionInfo | Format-List ProductName,ProductVersion,CompanyName"
+pwsh -NoProfile -c "(Get-Item src/ScreenBugs/bin/Debug/net10.0-windows/ScreenBugs.exe).VersionInfo | Format-List ProductName,ProductVersion,CompanyName"
 ```
 
 Expected: `0 Error(s)`; `1.0.0`; and the executable reporting ProductName `Screen Bugs`, ProductVersion `1.0.0`, CompanyName `Addam Boord`.
@@ -918,7 +946,7 @@ public static class WizardBitmaps
     private static readonly Color Ant = Color.FromArgb(216, 50, 31);
     private static readonly Color Panel = Color.FromArgb(250, 250, 250);
 
-    /// <summary>The welcome and finish panel: one large ant, low enough to clear the page text.</summary>
+    /// <summary>The welcome and finish panel: one large ant, centred, low on the panel.</summary>
     public static Bitmap Side(int width, int height) =>
         Compose(width, height, glyphSize: 132, x: (width - 132) / 2, y: height - 168);
 
@@ -1016,19 +1044,44 @@ In `ScreenBugs.slnx`, add a `/tools/` folder after the `/tests/` one:
 
 ```bash
 export MSBUILDDISABLENODEREUSE=1
-dotnet run --project tools/IconGen -nodeReuse:false
+dotnet run --project tools/IconGen
 ls -la assets/
 ```
 
-Expected: the three files exist. `ScreenBugs.ico` should be roughly 15–30 KB (seven PNG payloads), `wizard-side.bmp` exactly 154,584 bytes and `wizard-header.bmp` exactly 25,656 bytes — 24-bit BMPs are a fixed size for their dimensions, so anything else means the pixel format is wrong.
+Expected: the three files exist, at these sizes. All three were measured on this machine; they are not estimates:
+
+- `ScreenBugs.ico` roughly 11–12 KB. The glyph is flat single-colour, so its seven PNG payloads
+  compress hard. Much above ~30 KB suggests the images are not PNG-compressed.
+- `wizard-side.bmp` **exactly 154,542** bytes and `wizard-header.bmp` **exactly 25,818** bytes.
+  A 24-bit BMP is a fixed size for its dimensions — a 54-byte header plus a 4-byte-aligned
+  stride times the height (164×3 = 492, already aligned, so 54 + 492×314; 150×3 = 450 padded
+  to 452, so 54 + 452×57). Any other size means the pixel format is not `Format24bppRgb`.
 
 - [ ] **Step 7: Look at the icon**
 
+Read the icon through WIC, **not** `System.Drawing.Icon`: GDI+ cannot decode a PNG-compressed
+256px entry and silently hands back the 128px one instead, which would make a correct icon look
+like a failed write.
+
 ```bash
-powershell -c "Add-Type -AssemblyName System.Drawing; \$i = New-Object System.Drawing.Icon('assets/ScreenBugs.ico', 256, 256); \$i.ToBitmap().Save('/tmp/icon-256.png'); \$i.Dispose()"
+pwsh -NoProfile -c "
+Add-Type -AssemblyName PresentationCore
+\$stream = [System.IO.File]::OpenRead((Resolve-Path 'assets/ScreenBugs.ico'))
+\$decoder = [System.Windows.Media.Imaging.BitmapDecoder]::Create(\$stream, 'None', 'OnLoad')
+'frames: ' + ((\$decoder.Frames | ForEach-Object { \"\$(\$_.PixelWidth)x\$(\$_.PixelHeight)\" }) -join ' ')
+\$largest = \$decoder.Frames | Sort-Object PixelWidth -Descending | Select-Object -First 1
+\$encoder = New-Object System.Windows.Media.Imaging.PngBitmapEncoder
+\$encoder.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create(\$largest))
+\$out = [System.IO.File]::Create(\"\$env:TEMP\icon-largest.png\")
+\$encoder.Save(\$out); \$out.Close(); \$stream.Close()
+\"wrote \$env:TEMP\icon-largest.png at \$(\$largest.PixelWidth)px\"
+"
 ```
 
-Open `/tmp/icon-256.png` and `assets/wizard-side.bmp` and confirm: a recognisable red ant, antialiased, proportional at 256px, on a transparent (icon) and near-white (bitmap) background. If the legs look hairline-thin at 256px the scale transform is not being applied.
+Expected: seven frames — `16x16 24x24 32x32 48x48 64x64 128x128 256x256` — and a 256px PNG
+written. Open that PNG and `assets/wizard-side.bmp` and confirm a recognisable red ant,
+antialiased and proportional, on a transparent (icon) and near-white (bitmap) background. If the
+legs look hairline-thin at 256px the scale transform is not being applied.
 
 - [ ] **Step 8: Commit**
 
@@ -1069,10 +1122,12 @@ In `src/ScreenBugs/ScreenBugs.csproj`, add to the main `PropertyGroup` next to `
 ```bash
 export MSBUILDDISABLENODEREUSE=1
 dotnet build src/ScreenBugs -nologo -v q -nodeReuse:false > /tmp/b.log 2>&1; echo $?; grep -E "error|Error\(s\)" /tmp/b.log
-powershell -c "Add-Type -AssemblyName System.Drawing; \$i = [System.Drawing.Icon]::ExtractAssociatedIcon((Resolve-Path 'src/ScreenBugs/bin/Debug/net10.0-windows/ScreenBugs.exe')); \$i.ToBitmap().Save('/tmp/exe-icon.png'); \$i.Dispose(); 'extracted'"
+pwsh -NoProfile -c "Add-Type -AssemblyName System.Drawing; \$i = [System.Drawing.Icon]::ExtractAssociatedIcon((Resolve-Path 'src/ScreenBugs/bin/Debug/net10.0-windows/ScreenBugs.exe')); \$i.ToBitmap().Save(\"\$env:TEMP\exe-icon.png\"); \$i.Dispose(); \"wrote \$env:TEMP\exe-icon.png\""
 ```
 
-Expected: `0 Error(s)` and `extracted`. Open `/tmp/exe-icon.png` — it must be the ant, not the generic .NET icon. Also check `src/ScreenBugs/bin/Debug/net10.0-windows/` in Explorer with large icons.
+Expected: `0 Error(s)` and the path it wrote. Open that PNG — it must be the ant, not the generic
+.NET icon. `ExtractAssociatedIcon` returns the 32px entry, which GDI+ handles fine; only the
+PNG-compressed 256px entry defeats it. Also check `src/ScreenBugs/bin/Debug/net10.0-windows/` in Explorer with large icons.
 
 - [ ] **Step 3: Commit**
 
@@ -1640,7 +1695,7 @@ Then confirm the switch validation and the registry:
 ```bash
 "$DEV" /S /CURRENTUSER /BUGTYPE=Wasp /BUGCOUNT=999 /D=C:\Temp\sb-dev2
 grep -E "Type|BugCount|StartAtLogin" "/c/Temp/sb-dev2/install-defaults.json"
-powershell -c "Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ScreenBugs' | Format-List DisplayName,DisplayVersion,Publisher,InstallLocation,QuietUninstallString,EstimatedSize"
+pwsh -NoProfile -c "Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ScreenBugs' | Format-List DisplayName,DisplayVersion,Publisher,InstallLocation,QuietUninstallString,EstimatedSize"
 ```
 
 Expected: `BlackGardenAnt` (unknown type fell back), `"BugCount": 50` (clamped), `"StartAtLogin": true` (the default), and every Add/Remove Programs value populated with `DisplayVersion` `1.0.0`.
@@ -1649,7 +1704,7 @@ Expected: `BlackGardenAnt` (unknown type fell back), `"BugCount": 50` (clamped),
 
 ```bash
 rm -rf "/c/Temp/sb-dev" "/c/Temp/sb-dev2"
-powershell -c "Remove-Item -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ScreenBugs' -Recurse -Force -ErrorAction SilentlyContinue"
+pwsh -NoProfile -c "Remove-Item -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ScreenBugs' -Recurse -Force -ErrorAction SilentlyContinue"
 rm -f "$USERPROFILE/Desktop/Screen Bugs.lnk" "$APPDATA/Microsoft/Windows/Start Menu/Programs/Screen Bugs.lnk"
 ```
 
@@ -1770,11 +1825,11 @@ ls "/c/Temp/sb-dev/" && ls "$USERPROFILE/Desktop/Screen Bugs.lnk"
 
 # _?= is required: without it the launched process relocates itself to $TEMP and returns
 # immediately, so these assertions would race an uninstall still in progress.
-powershell -c "Start-Process -FilePath 'C:\Temp\sb-dev\Uninstall.exe' -ArgumentList '/S','_?=C:\Temp\sb-dev' -Wait"
+pwsh -NoProfile -c "Start-Process -FilePath 'C:\Temp\sb-dev\Uninstall.exe' -ArgumentList '/S','_?=C:\Temp\sb-dev' -Wait"
 
 # _?= also stops the uninstaller deleting its own file, so only Uninstall.exe should remain.
 ls "/c/Temp/sb-dev/"
-powershell -c "Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ScreenBugs'"
+pwsh -NoProfile -c "Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ScreenBugs'"
 ls "$USERPROFILE/Desktop/Screen Bugs.lnk" 2>&1
 rm -rf "/c/Temp/sb-dev"
 ```
@@ -1927,7 +1982,7 @@ Append to `.gitignore` (`build/publish/` is already covered by the existing `pub
 This one is slow — a full Release publish plus a solid-LZMA compress of ~155 MB. Expect several minutes.
 
 ```bash
-powershell -File build/build-installer.ps1
+pwsh -NoProfile -File build/build-installer.ps1
 ```
 
 Expected: `Built .../build/ScreenBugs-Setup-1.0.0.exe`, roughly 60–75 MB, from ~254 published files.
@@ -1975,7 +2030,7 @@ Two safety rules it must honour. It installs **per-user into a temporary directo
 The script refuses to run while a per-user install exists, which is the point. Remove it through Add/Remove Programs, or:
 
 ```bash
-powershell -c "& (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ScreenBugs').UninstallString"
+pwsh -NoProfile -c "& (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ScreenBugs').UninstallString"
 ```
 
 - [ ] **Step 2: Write the script**
@@ -2140,7 +2195,7 @@ exit 1
 - [ ] **Step 3: Run it**
 
 ```bash
-powershell -File build/verify-install.ps1
+pwsh -NoProfile -File build/verify-install.ps1
 echo "exit: $?"
 ```
 
@@ -2188,7 +2243,7 @@ An all-users install raises exactly one UAC prompt; a current-user install raise
 With no `settings.json` (move yours aside), install with startup checked. The app starts with the chosen type and count; the Options dialog shows them; its "Run at Windows startup" box is checked; and the `Run` value holds the quoted install path:
 
 ```bash
-powershell -c "(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run').ScreenBugs"
+pwsh -NoProfile -c "(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run').ScreenBugs"
 ```
 
 - [ ] **Step 4: A fresh profile, startup off, with a stale `Run` value**
@@ -2196,7 +2251,7 @@ powershell -c "(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersio
 This is the case `FirstRunSeed`'s three-state startup exists for. Plant a stale value, remove `settings.json`, then install with startup **unchecked**:
 
 ```bash
-powershell -c "Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name ScreenBugs -Value '\"C:\Nowhere\ScreenBugs.exe\"'"
+pwsh -NoProfile -c "Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name ScreenBugs -Value '\"C:\Nowhere\ScreenBugs.exe\"'"
 rm -f "$LOCALAPPDATA/ScreenBugs/settings.json"
 ```
 
@@ -2232,10 +2287,10 @@ Setup refuses, with a clear message, on 32-bit Windows or a build below 14393. W
 export MSBUILDDISABLENODEREUSE=1
 dotnet build tests/ScreenBugs.Tests -nologo -v q -nodeReuse:false > /tmp/b.log 2>&1; echo $?; grep -E "Error\(s\)" /tmp/b.log
 dotnet test tests/ScreenBugs.Tests -nologo -v q --no-build -nodeReuse:false
-powershell -File build/verify-install.ps1
+pwsh -NoProfile -File build/verify-install.ps1
 ```
 
-Expected: `Passed: 112`, and `All checks passed.`
+Expected: `Passed: 115`, and `All checks passed.`
 
 - [ ] **Step 12: Note anything outstanding**
 
