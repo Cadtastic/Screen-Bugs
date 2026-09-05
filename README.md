@@ -36,7 +36,8 @@ want a desktop shortcut. You can install for everyone on the machine or just for
 ## Meet the bugs
 
 Nine species, each hand-drawn as vector art and animated leg-by-leg. Every image below is
-rendered by the app's own painter — this is exactly what walks across your screen.
+rendered by the app's own painter, so this is exactly what walks across your screen — bar the
+white outline, which is only here to keep the darker species legible on a dark page.
 
 <table>
 <tr>
