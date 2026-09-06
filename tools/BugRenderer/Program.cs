@@ -17,6 +17,12 @@ public static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        if (args.Length > 0 && args[0] != "--filmstrip")
+        {
+            Console.Error.WriteLine($"Unknown argument '{args[0]}'. Usage: BugRenderer [--filmstrip [dir]]");
+            Environment.Exit(2);
+        }
+
         string root = FindRepositoryRoot();
         var registry = new BugPainterRegistry();
 
@@ -34,7 +40,7 @@ public static class Program
     }
 
     private static void WriteAll(
-        string directory, BugPainterRegistry registry, Action<string, SpeciesId, BugPainterRegistry> write, string what)
+        string directory, BugPainterRegistry registry, Action<string, SpeciesId, BugPainterRegistry> write, string label)
     {
         foreach (var species in SpeciesCatalog.All)
         {
@@ -43,7 +49,7 @@ public static class Program
             Console.WriteLine($"{species.Id,-20} {new FileInfo(path).Length,7:N0} bytes");
         }
 
-        Console.WriteLine($"\nWrote {SpeciesCatalog.All.Count} {what} to {directory}");
+        Console.WriteLine($"\nWrote {SpeciesCatalog.All.Count} {label} to {directory}");
     }
 
     private static string FindRepositoryRoot()

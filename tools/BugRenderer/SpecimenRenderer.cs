@@ -9,7 +9,8 @@ namespace BugRenderer;
 
 /// <summary>
 /// Draws one species to a PNG using the app's own painter, so the documentation cannot drift
-/// from what actually crawls across the screen.
+/// from what actually crawls across the screen. Its measuring, sizing and saving steps are
+/// shared with <see cref="FilmstripRenderer"/>.
 /// </summary>
 public static class SpecimenRenderer
 {
@@ -34,9 +35,9 @@ public static class SpecimenRenderer
     {
         var painter = registry.Get(id);
 
-        // A bug at leg phase 0: every leg sits at its neutral swing. Species with a body wave
-        // show the curve that phase gives them, which is exactly what the first frame of a
-        // stride looks like on screen.
+        // A bug at leg phase 0: the first frame of a stride. Legs sit wherever their group
+        // offset puts them, and species with a body wave show the curve that phase gives them,
+        // which is exactly what walks across the screen.
         var bug = new Bug(id: 0, SpeciesCatalog.Get(id), seed: 0);
 
         Rect bounds = Measure(painter, bug);
@@ -68,6 +69,7 @@ public static class SpecimenRenderer
         return measured.ContentBounds;
     }
 
+    /// <summary>Encodes <paramref name="image"/> as PNG at <paramref name="path"/>, creating the directory if needed.</summary>
     internal static void SavePng(BitmapSource image, string path)
     {
         var encoder = new PngBitmapEncoder();

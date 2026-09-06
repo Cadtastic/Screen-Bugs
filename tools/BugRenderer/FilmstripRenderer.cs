@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -7,14 +8,21 @@ using ScreenBugs.Rendering;
 namespace BugRenderer;
 
 /// <summary>
-/// Draws one species across a full stride, eight frames side by side, so the gait and the body
-/// wave can be judged without watching the live overlay. A review aid only: nothing here ships.
+/// Draws one species across a full stride, eight frames side by side and each labelled with its
+/// leg phase, so the gait and the body wave can be judged without watching the live overlay. A
+/// review aid only: nothing here ships.
 /// </summary>
 public static class FilmstripRenderer
 {
     private const int Frames = 8;
     private const double Gap = 8.0;
+
+    /// <summary>Smaller than the specimen's padding because there is no outline to make room for.</summary>
     private const double Padding = 4.0;
+
+    private const double LabelHeight = 14.0;
+
+    private static readonly Typeface LabelTypeface = new("Segoe UI");
 
     public static void Write(string path, SpeciesId id, BugPainterRegistry registry)
     {
@@ -32,14 +40,14 @@ public static class FilmstripRenderer
         Rect bounds = Rect.Empty;
         foreach (var bug in bugs)
         {
-            bounds.Union(SpecimenRenderer.Measure(painter, bug));
+            bounds = Rect.Union(bounds, SpecimenRenderer.Measure(painter, bug));
         }
 
         double zoom = SpecimenRenderer.TargetSize / Math.Max(bounds.Width, bounds.Height);
         double frameWidth = Math.Ceiling(bounds.Width * zoom);
         double frameHeight = Math.Ceiling(bounds.Height * zoom);
         int width = (int)Math.Ceiling((Padding * 2) + (Frames * frameWidth) + ((Frames - 1) * Gap));
-        int height = (int)Math.Ceiling((Padding * 2) + frameHeight);
+        int height = (int)Math.Ceiling((Padding * 2) + frameHeight + LabelHeight);
 
         var visual = new DrawingVisual();
         using (var dc = visual.RenderOpen())
@@ -56,6 +64,16 @@ public static class FilmstripRenderer
                 dc.Pop();
                 dc.Pop();
                 dc.Pop();
+
+                var label = new FormattedText(
+                    bugs[k].LegPhase.ToString("0.000", CultureInfo.InvariantCulture),
+                    CultureInfo.InvariantCulture,
+                    FlowDirection.LeftToRight,
+                    LabelTypeface,
+                    10.0,
+                    Brushes.Gray,
+                    1.0);
+                dc.DrawText(label, new Point(Padding + (k * (frameWidth + Gap)), Padding + frameHeight));
             }
         }
 
