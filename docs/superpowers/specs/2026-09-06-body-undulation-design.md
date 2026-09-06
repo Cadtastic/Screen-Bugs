@@ -145,6 +145,14 @@ gitignored; the images are never committed.
 Rendering the rigid species too is deliberate: their frames must differ only
 by legs, antennae and `Bob`.
 
+Implementation split: `SpecimenRenderer.Render` (measure-then-draw of one bug
+at one zoom into a `RenderTargetBitmap`) becomes internal so the new
+`FilmstripRenderer` can call it once per phase and lay the results out
+horizontally with an 8 px gap. Frame zoom reuses the specimen rule
+(`TargetSize` on the longest side of the union bounds), so a filmstrip is
+eight specimen-sized frames wide. `Write` keeps the outline and supersample
+for the README images; the filmstrip uses neither.
+
 `Bug.LegPhase` has an internal setter, so `ScreenBugs.Core` gains
 `<InternalsVisibleTo Include="BugRenderer" />` next to the existing test entry.
 That is the only line in Core this feature touches.
@@ -165,7 +173,7 @@ of testing.
 - Same phase gives the same offset (the "stops when paused" property: the
   function has no time input).
 
-`BodyWaveTests`:
+`BodyWaveTests` (all at `scale = 1`, so offsets are in DIPs):
 - Peak swing at `HeadY` is the head amplitude; at `TailY` the tail amplitude;
   at the midpoint, their mean.
 - Y beyond either end clamps to that end.
@@ -183,7 +191,11 @@ and the live overlay are the review for those.
   those specimens show a gentle mid-stride curve; the README promises the
   images are exactly what walks across the screen, and the curve is a better
   advert for the feature than a straight plank. Rigid species regenerate
-  byte-identical, which doubles as the "visually unchanged" check.
+  byte-identical, which doubles as the "visually unchanged" check (if a rigid
+  species' PNG does differ, compare visually before treating it as a failure;
+  the encoder is not guaranteed stable across machines). The comment in
+  `SpecimenRenderer.Write` that says phase 0 gives a symmetric pose is
+  corrected in the same commit.
 - The README developer-tools line for `tools/BugRenderer` mentions
   `--filmstrip`.
 
