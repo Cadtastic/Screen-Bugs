@@ -184,7 +184,7 @@ Needs the [.NET 10 SDK](https://dotnet.microsoft.com/download) and, for the inst
 
 ```bash
 dotnet build ScreenBugs.slnx          # build
-dotnet test tests/ScreenBugs.Tests    # 127 tests
+dotnet test tests/ScreenBugs.Tests    # 129 tests
 pwsh build/build-installer.ps1        # publish + package the installer
 pwsh build/verify-install.ps1         # install it four ways and assert the result
 ```

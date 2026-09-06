@@ -4,6 +4,8 @@ namespace ScreenBugs.Rendering;
 /// The undulation of one species in its specimen space: which Y is the head, which is the tail,
 /// how far each end swings, and how many wavelengths fit along the body. Amplitude grows
 /// linearly from head to tail so the head tracks straight while the rear swings widest.
+/// <paramref name="HeadY"/> and <paramref name="TailY"/> must differ; equal ends would divide by
+/// zero.
 /// </summary>
 public sealed record BodyWave(double HeadY, double TailY, double HeadAmplitudeDips, double TailAmplitudeDips, double Wavelengths)
 {

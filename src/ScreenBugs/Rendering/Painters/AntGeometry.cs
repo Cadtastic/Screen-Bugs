@@ -19,7 +19,7 @@ public sealed class AntGeometry(Color color, float bodyLength)
     /// between them sweeps head to tail twice a stride, so the ant alternates between bowing and
     /// hinging about its middle rather than pivoting at a fixed point.
     /// </summary>
-    private static readonly BodyWave Wave = new(HeadY: HeadY, TailY: GasterY, HeadAmplitudeDips: 0.25, TailAmplitudeDips: 0.75, Wavelengths: 0.5);
+    internal static readonly BodyWave Wave = new(HeadY: HeadY, TailY: GasterY, HeadAmplitudeDips: 0.25, TailAmplitudeDips: 0.75, Wavelengths: 0.5);
 
     private readonly double scale = bodyLength / SpecimenBodyLength;
     private readonly SolidColorBrush body = PainterPens.Brush(color);

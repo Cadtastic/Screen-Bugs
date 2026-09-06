@@ -14,7 +14,7 @@ public sealed class CentipedePainter : IBugPainter
     private const double TailY = 59.0;
 
     /// <summary>Spec 4.1: one wavelength along the body, the tail swinging six times wider than the head.</summary>
-    private static readonly BodyWave Wave = new(HeadY: HeadY, TailY: TailY, HeadAmplitudeDips: 0.5, TailAmplitudeDips: 3.0, Wavelengths: 1.0);
+    internal static readonly BodyWave Wave = new(HeadY: HeadY, TailY: TailY, HeadAmplitudeDips: 0.5, TailAmplitudeDips: 3.0, Wavelengths: 1.0);
 
     private static readonly Color Body = PainterPens.Hex("#b5702c");
     private static readonly Color Dark = PainterPens.Hex("#7a4519");
@@ -47,8 +47,10 @@ public sealed class CentipedePainter : IBugPainter
 
         dc.DrawEllipse(PainterPens.Shadow, null, new Point(3, 4), 14, 70);
 
-        // Each pair lags the one ahead by an eighth of a cycle, giving a wave along the body.
-        // Each pair also rides the body wave at its own segment's Y, so it stays attached.
+        // Each pair leads the one ahead by an eighth of a cycle, so the leg wave runs tail to head.
+        // The body wave runs the other way (head to tail, spec 3.1); the two were judged together on
+        // the filmstrip and do not fight. Each pair also rides the body wave at its own segment's Y,
+        // so it stays attached.
         for (int i = 0; i < AnimatedPairs; i++)
         {
             double y = FirstSegmentY + (SegmentSpacing * i);
@@ -66,6 +68,8 @@ public sealed class CentipedePainter : IBugPainter
         dc.DrawGeometry(null, hindLegPen, rightHindLeg);
         dc.Pop();
 
+        // headDx is pushed twice: the antennae go under the segments and the head goes over them,
+        // the same z-order as before the wave.
         dc.PushTransform(new TranslateTransform(headDx, 0));
         BodyMotion.DrawAntenna(dc, antennaPen, leftAntenna, new Point(-5, -78), bug.LegPhase, 0.0);
         BodyMotion.DrawAntenna(dc, antennaPen, rightAntenna, new Point(5, -78), bug.LegPhase, Math.PI);

@@ -17,16 +17,17 @@ public static class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        if (args.Length > 0 && args[0] != "--filmstrip")
-        {
-            Console.Error.WriteLine($"Unknown argument '{args[0]}'. Usage: BugRenderer [--filmstrip [dir]]");
-            Environment.Exit(2);
-        }
-
         string root = FindRepositoryRoot();
         var registry = new BugPainterRegistry();
 
-        if (args.Length > 0 && args[0] == "--filmstrip")
+        bool filmstrip = args.Length > 0 && args[0] == "--filmstrip";
+        if ((args.Length > 0 && !filmstrip) || args.Length > 2)
+        {
+            Console.Error.WriteLine("Usage: BugRenderer [--filmstrip [dir]]");
+            Environment.Exit(2);
+        }
+
+        if (filmstrip)
         {
             // artifacts/ is gitignored: filmstrips are looked at, never committed.
             string filmstrips = args.Length > 1

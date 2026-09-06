@@ -92,7 +92,10 @@ move with the tail.
 The rule that keeps legs attached: whatever offset a segment gets, its leg
 pair gets the same one, looked up from the same specimen Y. Legs are drawn
 before the body in every painter, so the offset is applied per leg pair with a
-`TranslateTransform` rather than by one body-wide transform.
+`TranslateTransform` rather than by one body-wide transform. In the code the
+translate lives in a `LegPainter.DrawLegPair` overload that takes the lateral
+offset, so painters pass the offset rather than pushing transforms of their
+own.
 
 Starting values; the filmstrip tunes them.
 

@@ -17,7 +17,7 @@ public static class BodyMotion
     /// Sideways offset in specimen units for a point at <paramref name="alongBody"/> (0 at the
     /// head, 1 at the tail): amplitude times sin(2π(phase − wavelengths·alongBody)). Subtracting
     /// the position term makes the crest travel head to tail as the phase advances. One cycle
-    /// per stride, so it locks to the leg wave rather than to <see cref="Bob"/>'s two.
+    /// per stride, matching the leg frequency rather than <see cref="Bob"/>'s two.
     /// Driven from LegPhase alone, so a paused bug stops rippling and a faster bug ripples faster.
     /// </summary>
     public static double Undulate(float legPhase, double scale, double alongBody, double amplitudeDips, double wavelengths) =>
