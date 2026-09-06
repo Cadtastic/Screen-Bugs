@@ -184,7 +184,7 @@ Needs the [.NET 10 SDK](https://dotnet.microsoft.com/download) and, for the inst
 
 ```bash
 dotnet build ScreenBugs.slnx          # build
-dotnet test tests/ScreenBugs.Tests    # 116 tests
+dotnet test tests/ScreenBugs.Tests    # 127 tests
 pwsh build/build-installer.ps1        # publish + package the installer
 pwsh build/verify-install.ps1         # install it four ways and assert the result
 ```
@@ -195,6 +195,7 @@ the code that draws them:
 ```bash
 dotnet run --project tools/IconGen      # app icon + installer wizard images
 dotnet run --project tools/BugRenderer  # the specimen images in this README
+dotnet run --project tools/BugRenderer -- --filmstrip   # each bug across a stride, for eyeballing gaits
 ```
 
 ### Layout
