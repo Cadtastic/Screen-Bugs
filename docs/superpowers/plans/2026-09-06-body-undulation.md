@@ -30,7 +30,7 @@ dotnet build src/ScreenBugs -nologo -v q -nodeReuse:false > artifacts/b.log 2>&1
 
 To run one test class: add `--filter "FullyQualifiedName~BodyMotionTests"` to the `dotnet test` line.
 
-**Starting point:** 116 tests pass on `main`. This plan adds 12.
+**Starting point:** 116 tests pass on `main`. This plan adds 11.
 
 **Looking at PNGs:** the filmstrips are the review. After each painter task, open the PNG with the Read tool (it renders images) and check the acceptance points listed in that task before committing.
 
@@ -232,7 +232,7 @@ In `src/ScreenBugs/Rendering/BodyMotion.cs`, after `Bob`:
 - [ ] **Step 4: Build and run the tests**
 
 Run the build-then-test commands with `--filter "FullyQualifiedName~BodyMotionTests"`.
-Expected: `Passed! - Failed: 0, Passed: 7`.
+Expected: `Passed! - Failed: 0, Passed: 6`.
 
 - [ ] **Step 5: Commit**
 
@@ -340,7 +340,7 @@ public sealed record BodyWave(double HeadY, double TailY, double HeadAmplitudeDi
 
 - [ ] **Step 4: Build and run the tests**
 
-Filter `BodyWaveTests`. Expected: `Passed: 5`. Then run the whole suite: `Passed: 128`.
+Filter `BodyWaveTests`. Expected: `Passed: 5`. Then run the whole suite: `Passed: 127`.
 
 - [ ] **Step 5: Commit**
 
@@ -675,7 +675,7 @@ Read `artifacts/filmstrips/Centipede.png` and check:
 
 - [ ] **Step 4: Run the full suite**
 
-Build then test. Expected: `Passed: 128`.
+Build then test. Expected: `Passed: 127`.
 
 - [ ] **Step 5: Commit**
 
@@ -757,7 +757,7 @@ Same build and filmstrip commands as Task 5. Read `artifacts/filmstrips/BlackGar
 
 - [ ] **Step 4: Run the full suite**
 
-Expected: `Passed: 128`.
+Expected: `Passed: 127`.
 
 - [ ] **Step 5: Commit**
 
@@ -884,7 +884,7 @@ dotnet run --project tools/BugRenderer  # the specimen images in this README
 dotnet run --project tools/BugRenderer -- --filmstrip   # each bug across a stride, for eyeballing gaits
 ```
 
-And update the test count comment on the `dotnet test` line to the number the suite now reports (128).
+And update the test count comment on the `dotnet test` line to the number the suite now reports (127).
 
 - [ ] **Step 4: Commit**
 

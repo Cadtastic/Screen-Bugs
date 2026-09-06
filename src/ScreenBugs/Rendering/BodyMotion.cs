@@ -3,7 +3,7 @@ using System.Windows.Media;
 
 namespace ScreenBugs.Rendering;
 
-/// <summary>Body bob and antenna waggle shared by every painter.</summary>
+/// <summary>Body bob, per-segment undulation and antenna waggle, shared by the painters that use them.</summary>
 public static class BodyMotion
 {
     private const double BobDips = 1.0;
@@ -18,6 +18,7 @@ public static class BodyMotion
     /// head, 1 at the tail): amplitude times sin(2π(phase − wavelengths·alongBody)). Subtracting
     /// the position term makes the crest travel head to tail as the phase advances. One cycle
     /// per stride, so it locks to the leg wave rather than to <see cref="Bob"/>'s two.
+    /// Driven from LegPhase alone, so a paused bug stops rippling and a faster bug ripples faster.
     /// </summary>
     public static double Undulate(float legPhase, double scale, double alongBody, double amplitudeDips, double wavelengths) =>
         amplitudeDips / scale * Math.Sin(2.0 * Math.PI * (legPhase - wavelengths * alongBody));

@@ -54,13 +54,4 @@ public sealed class BodyMotionTests
             .Max();
         Assert.Equal(1.5, peak, 1e-3);
     }
-
-    [Fact]
-    public void Undulate_depends_on_phase_alone_so_a_paused_bug_holds_its_shape()
-    {
-        // No time input: while LegPhase stands still, so does the wave.
-        Assert.Equal(
-            BodyMotion.Undulate(0.3f, 1.0, 0.7, 3.0, 1.0),
-            BodyMotion.Undulate(0.3f, 1.0, 0.7, 3.0, 1.0));
-    }
 }
