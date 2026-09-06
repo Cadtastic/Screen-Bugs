@@ -17,7 +17,7 @@ pairs already ripple in a metachronal wave.
 This feature adds a per-segment sideways offset keyed on position along the
 body, so different points of a long body sit at different points of a
 travelling wave. The centipede snakes; the two ants sway subtly; the praying
-mantis is tried and kept only if it looks right.
+mantis was tried and dropped (section 2).
 
 Purely a rendering change. No new simulation state, no settings, no logic in
 `ScreenBugs.Core`. `LegPhase` already carries everything needed.
@@ -120,6 +120,9 @@ Starting values; the filmstrip tunes them.
   petiole (-1) and gaster (18) each centred at their own offset.
 
 ### 4.3 Praying mantis (trial)
+
+Dropped; see the species table in section 2. The recipe below is kept as the
+record of what was tried.
 
 `new BodyWave(HeadY: -84, TailY: 80, HeadAmplitudeDips: 0.0, TailAmplitudeDips: 0.8, Wavelengths: 0.5)`
 
