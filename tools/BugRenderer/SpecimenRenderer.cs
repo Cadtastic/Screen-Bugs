@@ -14,7 +14,7 @@ namespace BugRenderer;
 public static class SpecimenRenderer
 {
     /// <summary>How many pixels the longest side of a specimen should occupy.</summary>
-    private const double TargetSize = 320.0;
+    internal const double TargetSize = 320.0;
 
     /// <summary>
     /// Half the white outline's width, in final-image pixels. The README displays these around
@@ -34,21 +34,12 @@ public static class SpecimenRenderer
     {
         var painter = registry.Get(id);
 
-        // A bug with the default leg phase: every leg sits at its neutral swing, which gives a
-        // symmetric specimen pose rather than a frame frozen mid-stride.
+        // A bug at leg phase 0: every leg sits at its neutral swing. Species with a body wave
+        // show the curve that phase gives them, which is exactly what the first frame of a
+        // stride looks like on screen.
         var bug = new Bug(id: 0, SpeciesCatalog.Get(id), seed: 0);
 
-        // Paint once at 1:1 purely to learn how much room the drawing needs. The painter works
-        // in bug-local space around the body centre and every species covers a different extent
-        // once legs, antennae and shadow are counted, so the bounds cannot be predicted from
-        // body length alone.
-        var measured = new DrawingVisual();
-        using (var dc = measured.RenderOpen())
-        {
-            painter.Paint(dc, bug);
-        }
-
-        Rect bounds = measured.ContentBounds;
+        Rect bounds = Measure(painter, bug);
         double zoom = TargetSize / Math.Max(bounds.Width, bounds.Height);
         int width = (int)Math.Ceiling((bounds.Width * zoom) + (Padding * 2));
         int height = (int)Math.Ceiling((bounds.Height * zoom) + (Padding * 2));
@@ -57,8 +48,30 @@ public static class SpecimenRenderer
         var outlined = OutlineCompositor.AddOutline(bare, OutlineRadius * Supersample);
         var final = Downscale(outlined, width, height);
 
+        SavePng(final, path);
+    }
+
+    /// <summary>
+    /// Paints once, unscaled, purely to learn how much room the drawing needs. The painter works
+    /// in bug-local space around the body centre and every species covers a different extent
+    /// once legs, antennae and shadow are counted, so the bounds cannot be predicted from body
+    /// length alone.
+    /// </summary>
+    internal static Rect Measure(IBugPainter painter, Bug bug)
+    {
+        var measured = new DrawingVisual();
+        using (var dc = measured.RenderOpen())
+        {
+            painter.Paint(dc, bug);
+        }
+
+        return measured.ContentBounds;
+    }
+
+    internal static void SavePng(BitmapSource image, string path)
+    {
         var encoder = new PngBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(final));
+        encoder.Frames.Add(BitmapFrame.Create(image));
 
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         using var file = File.Create(path);
