@@ -145,13 +145,14 @@ gitignored; the images are never committed.
 Rendering the rigid species too is deliberate: their frames must differ only
 by legs, antennae and `Bob`.
 
-Implementation split: `SpecimenRenderer.Render` (measure-then-draw of one bug
-at one zoom into a `RenderTargetBitmap`) becomes internal so the new
-`FilmstripRenderer` can call it once per phase and lay the results out
-horizontally with an 8 px gap. Frame zoom reuses the specimen rule
-(`TargetSize` on the longest side of the union bounds), so a filmstrip is
-eight specimen-sized frames wide. `Write` keeps the outline and supersample
-for the README images; the filmstrip uses neither.
+Implementation split: `SpecimenRenderer` exposes its measuring step
+(`Measure`, the paint-once-to-learn-the-bounds trick), `TargetSize` and the
+PNG save as internal members. The new `FilmstripRenderer` measures all eight
+phases, draws them into one visual with an 8 px gap, and saves through the
+same encoder path. Frame zoom reuses the specimen rule (`TargetSize` on the
+longest side of the union bounds), so a filmstrip is eight specimen-sized
+frames wide. `Write` keeps the outline and supersample for the README images;
+the filmstrip uses neither.
 
 `Bug.LegPhase` has an internal setter, so `ScreenBugs.Core` gains
 `<InternalsVisibleTo Include="BugRenderer" />` next to the existing test entry.
