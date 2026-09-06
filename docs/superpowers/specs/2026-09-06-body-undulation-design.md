@@ -31,7 +31,7 @@ motion (everything follows `LegPhase`), changes to rigid-bodied species.
 | --- | --- | --- |
 | Centipede | Full snake: nine segments plus tail, amplitude grows head to tail, one wavelength along the body | Body is already a chain of segments drawn in a loop |
 | Black garden ant, red fire ant | Subtle sway: head, thorax, petiole, gaster each offset, half a wavelength | Four parts along the axis; shared `AntGeometry` |
-| Praying mantis | Trial: only the abdomen swings relative to the thorax | The abdomen is one path and cannot bend; dropped if it reads wrong |
+| Praying mantis | Tried and dropped: the abdomen's swing is at most 0.56 DIP on a 56 DIP body, invisible at the size the bug is actually seen, and it cannot be turned up without sliding a rigid path off the thorax | The abdomen is one path and cannot bend; dropped if it reads wrong |
 | Ladybug, stink bug, cockroach, stag beetle, spider | Unchanged, keep `Bob` | Rigid shell, or the legs do all the work |
 
 The mantis rule: implement the abdomen swing, render the filmstrip (section 5),
