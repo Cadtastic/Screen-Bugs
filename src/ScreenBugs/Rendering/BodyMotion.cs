@@ -13,6 +13,15 @@ public static class BodyMotion
     public static double Bob(float legPhase, double scale) =>
         BobDips / scale * Math.Sin(4.0 * Math.PI * legPhase);
 
+    /// <summary>
+    /// Sideways offset in specimen units for a point at <paramref name="alongBody"/> (0 at the
+    /// head, 1 at the tail): amplitude times sin(2π(phase − wavelengths·alongBody)). Subtracting
+    /// the position term makes the crest travel head to tail as the phase advances. One cycle
+    /// per stride, so it locks to the leg wave rather than to <see cref="Bob"/>'s two.
+    /// </summary>
+    public static double Undulate(float legPhase, double scale, double alongBody, double amplitudeDips, double wavelengths) =>
+        amplitudeDips / scale * Math.Sin(2.0 * Math.PI * (legPhase - wavelengths * alongBody));
+
     /// <summary>Antenna rotation in degrees: 3° times sin(2π phase + side); side is 0 for the left antenna and π for the right.</summary>
     public static double AntennaAngle(float legPhase, double side) =>
         AntennaAmplitudeDegrees * Math.Sin(2.0 * Math.PI * legPhase + side);
