@@ -14,6 +14,8 @@ public sealed class AntGeometry(Color color, float bodyLength)
     private const double GasterY = 18.0;
 
     /// <summary>Spec 4.2: half a wavelength, so the body sways rather than snakes; the gaster swings three times the head.</summary>
+    // Half a wavelength puts head and gaster in exact antiphase; the node between them travels along the body
+    // over a stride, so the ant alternates between bowing and swaying rather than hinging at one point.
     private static readonly BodyWave Wave = new(HeadY: HeadY, TailY: GasterY, HeadAmplitudeDips: 0.25, TailAmplitudeDips: 0.75, Wavelengths: 0.5);
 
     private readonly double scale = bodyLength / SpecimenBodyLength;
@@ -34,9 +36,16 @@ public sealed class AntGeometry(Color color, float bodyLength)
 
         dc.DrawEllipse(PainterPens.Shadow, null, new Point(3, 22), 14, 19);
 
-        DrawLegPair(dc, bug.LegPhase, new(-6, -22), new(-22, -36), new(-30, -24), 0.0);
-        DrawLegPair(dc, bug.LegPhase, new(-7, -15), new(-26, -14), new(-34, -2), 0.5);
-        DrawLegPair(dc, bug.LegPhase, new(-6, -8), new(-22, 4), new(-26, 20), 0.0);
+        // Each pair rides the body wave at its hip's Y, so it stays on the thorax as the body sways.
+        LegPainter.DrawLegPair(
+            dc, legPen, new(-6, -22), new(-22, -36), new(-30, -24),
+            LegPainter.Swing(bug.LegPhase, 0.0, LegAmplitudeDegrees), Offset(-22, bug.LegPhase));
+        LegPainter.DrawLegPair(
+            dc, legPen, new(-7, -15), new(-26, -14), new(-34, -2),
+            LegPainter.Swing(bug.LegPhase, 0.5, LegAmplitudeDegrees), Offset(-15, bug.LegPhase));
+        LegPainter.DrawLegPair(
+            dc, legPen, new(-6, -8), new(-22, 4), new(-26, 20),
+            LegPainter.Swing(bug.LegPhase, 0.0, LegAmplitudeDegrees), Offset(-8, bug.LegPhase));
 
         dc.PushTransform(new TranslateTransform(Offset(HeadY, bug.LegPhase), 0));
         dc.DrawGeometry(null, legPen, leftMandible);
@@ -50,14 +59,6 @@ public sealed class AntGeometry(Color color, float bodyLength)
         dc.DrawEllipse(body, null, new Point(Offset(PetioleY, bug.LegPhase), PetioleY), 3, 3);
         dc.DrawEllipse(body, null, new Point(Offset(GasterY, bug.LegPhase), GasterY), 12, 17);
 
-        dc.Pop();
-    }
-
-    /// <summary>A leg pair rides the body wave at its hip's Y, so it stays on the thorax as the body sways.</summary>
-    private void DrawLegPair(DrawingContext dc, float legPhase, Point hip, Point knee, Point foot, double groupOffset)
-    {
-        dc.PushTransform(new TranslateTransform(Offset(hip.Y, legPhase), 0));
-        LegPainter.DrawLegPair(dc, legPen, hip, knee, foot, LegPainter.Swing(legPhase, groupOffset, LegAmplitudeDegrees));
         dc.Pop();
     }
 

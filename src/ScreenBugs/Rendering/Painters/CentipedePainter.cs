@@ -47,27 +47,26 @@ public sealed class CentipedePainter : IBugPainter
 
         dc.DrawEllipse(PainterPens.Shadow, null, new Point(3, 4), 14, 70);
 
-        double head = Offset(HeadY, bug.LegPhase);
-        double tail = Offset(TailY, bug.LegPhase);
-
         // Each pair lags the one ahead by an eighth of a cycle, giving a wave along the body.
         // Each pair also rides the body wave at its own segment's Y, so it stays attached.
         for (int i = 0; i < AnimatedPairs; i++)
         {
             double y = FirstSegmentY + (SegmentSpacing * i);
-            dc.PushTransform(new TranslateTransform(Offset(y, bug.LegPhase), 0));
             LegPainter.DrawLegPair(
                 dc, legPen, new(-8, y), new(-18, y + 5), new(-24, y + 14),
-                LegPainter.Swing(bug.LegPhase, 0.125 * i, LegAmplitudeDegrees));
-            dc.Pop();
+                LegPainter.Swing(bug.LegPhase, 0.125 * i, LegAmplitudeDegrees),
+                Offset(y, bug.LegPhase));
         }
 
-        dc.PushTransform(new TranslateTransform(tail, 0));
+        double headDx = Offset(HeadY, bug.LegPhase);
+        double tailDx = Offset(TailY, bug.LegPhase);
+
+        dc.PushTransform(new TranslateTransform(tailDx, 0));
         dc.DrawGeometry(null, hindLegPen, leftHindLeg);
         dc.DrawGeometry(null, hindLegPen, rightHindLeg);
         dc.Pop();
 
-        dc.PushTransform(new TranslateTransform(head, 0));
+        dc.PushTransform(new TranslateTransform(headDx, 0));
         BodyMotion.DrawAntenna(dc, antennaPen, leftAntenna, new Point(-5, -78), bug.LegPhase, 0.0);
         BodyMotion.DrawAntenna(dc, antennaPen, rightAntenna, new Point(5, -78), bug.LegPhase, Math.PI);
         dc.Pop();
@@ -78,9 +77,9 @@ public sealed class CentipedePainter : IBugPainter
             dc.DrawEllipse(body, outline, new Point(Offset(y, bug.LegPhase), y), 9, 7);
         }
 
-        dc.DrawEllipse(body, outline, new Point(tail, TailY), 8, 6.5);
+        dc.DrawEllipse(body, outline, new Point(tailDx, TailY), 8, 6.5);
 
-        dc.PushTransform(new TranslateTransform(head, 0));
+        dc.PushTransform(new TranslateTransform(headDx, 0));
         dc.DrawEllipse(dark, null, new Point(0, HeadY), 9, 8);
         dc.DrawEllipse(black, null, new Point(-4, -75), 1.5, 1.5);
         dc.DrawEllipse(black, null, new Point(4, -75), 1.5, 1.5);

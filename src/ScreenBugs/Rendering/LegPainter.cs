@@ -30,5 +30,16 @@ public static class LegPainter
         DrawLeg(dc, pen, Mirror(hip), Mirror(knee), Mirror(foot), swingRadians);
     }
 
+    /// <summary>
+    /// <see cref="DrawLegPair(DrawingContext, Pen, Point, Point, Point, double)"/>, with the whole pair
+    /// shifted sideways by <paramref name="lateralOffset"/> so it rides the body segment it belongs to.
+    /// </summary>
+    public static void DrawLegPair(DrawingContext dc, Pen pen, Point hip, Point knee, Point foot, double swingRadians, double lateralOffset)
+    {
+        dc.PushTransform(new TranslateTransform(lateralOffset, 0));
+        DrawLegPair(dc, pen, hip, knee, foot, swingRadians);
+        dc.Pop();
+    }
+
     public static Point Mirror(Point point) => new(-point.X, point.Y);
 }
