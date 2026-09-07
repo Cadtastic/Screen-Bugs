@@ -157,7 +157,7 @@ Settings live in `%LocalAppData%\ScreenBugs\settings.json`.
 For scripted deployment:
 
 ```
-ScreenBugs-Setup-1.0.0.exe /S /CURRENTUSER /BUGTYPE=HouseSpider /BUGCOUNT=12 /STARTUP=1 /DESKTOP=0
+ScreenBugs-Setup-1.1.0.exe /S /CURRENTUSER /BUGTYPE=HouseSpider /BUGCOUNT=12 /STARTUP=1 /DESKTOP=0
 ```
 
 | Switch | Meaning |
