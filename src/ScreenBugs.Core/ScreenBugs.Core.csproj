@@ -9,6 +9,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="ScreenBugs.Tests" />
+    <!-- The filmstrip sets Bug.LegPhase directly; nothing else in the tool needs internals. -->
+    <InternalsVisibleTo Include="BugRenderer" />
   </ItemGroup>
 
 </Project>

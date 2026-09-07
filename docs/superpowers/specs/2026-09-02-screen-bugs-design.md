@@ -340,7 +340,9 @@ Shared helpers:
   - Amplitude in degrees: ants 9, cockroach 8, ladybug 8, centipede 10,
     mantis 6, all others 7.
 - Body bob: the body group is offset sideways by `1 DIP * sin(4 * PI * LegPhase)`
-  so it sways with the steps.
+  so it sways with the steps. The centipede and the two ants instead offset each
+  body part by a head-to-tail travelling wave; see
+  `2026-09-06-body-undulation-design.md`.
 - Antennae waggle: rotate each antenna about its base by
   `3 degrees * sin(2 * PI * LegPhase + side)`, where `side` is 0 for the left
   antenna and `PI` for the right.

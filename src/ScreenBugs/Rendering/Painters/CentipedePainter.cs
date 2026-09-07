@@ -10,6 +10,11 @@ public sealed class CentipedePainter : IBugPainter
     private const int AnimatedPairs = 9;
     private const double SegmentSpacing = 13.0;
     private const double FirstSegmentY = -58.0;
+    private const double HeadY = -72.0;
+    private const double TailY = 59.0;
+
+    /// <summary>Spec 4.1: one wavelength along the body, the tail swinging six times wider than the head.</summary>
+    internal static readonly BodyWave Wave = new(HeadY: HeadY, TailY: TailY, HeadAmplitudeDips: 0.5, TailAmplitudeDips: 3.0, Wavelengths: 1.0);
 
     private static readonly Color Body = PainterPens.Hex("#b5702c");
     private static readonly Color Dark = PainterPens.Hex("#7a4519");
@@ -22,8 +27,8 @@ public sealed class CentipedePainter : IBugPainter
     private readonly Pen legPen;
     private readonly Pen hindLegPen;
     private readonly Pen antennaPen;
-    private readonly PathGeometry leftHindLeg = Shapes.Polyline(new(-8, 59), new(-16, 72), new(-20, 80));
-    private readonly PathGeometry rightHindLeg = Shapes.Polyline(new(8, 59), new(16, 72), new(20, 80));
+    private readonly PathGeometry leftHindLeg = Shapes.Polyline(new(-8, TailY), new(-16, 72), new(-20, 80));
+    private readonly PathGeometry rightHindLeg = Shapes.Polyline(new(8, TailY), new(16, 72), new(20, 80));
     private readonly PathGeometry leftAntenna = Shapes.Quadratic(new(-5, -78), new(-20, -86), new(-30, -92));
     private readonly PathGeometry rightAntenna = Shapes.Quadratic(new(5, -78), new(20, -86), new(30, -92));
 
@@ -42,32 +47,50 @@ public sealed class CentipedePainter : IBugPainter
 
         dc.DrawEllipse(PainterPens.Shadow, null, new Point(3, 4), 14, 70);
 
-        // Each pair lags the one ahead by an eighth of a cycle, giving a wave along the body.
+        // Each pair leads the one ahead by an eighth of a cycle, so the leg wave runs tail to head.
+        // The body wave runs the other way (head to tail, spec 3.1); the two were judged together on
+        // the filmstrip and do not fight. Each pair also rides the body wave at its own segment's Y,
+        // so it stays attached.
         for (int i = 0; i < AnimatedPairs; i++)
         {
-            double y = FirstSegmentY + SegmentSpacing * i;
+            double y = FirstSegmentY + (SegmentSpacing * i);
             LegPainter.DrawLegPair(
                 dc, legPen, new(-8, y), new(-18, y + 5), new(-24, y + 14),
-                LegPainter.Swing(bug.LegPhase, 0.125 * i, LegAmplitudeDegrees));
+                LegPainter.Swing(bug.LegPhase, 0.125 * i, LegAmplitudeDegrees),
+                Offset(y, bug.LegPhase));
         }
 
+        double headDx = Offset(HeadY, bug.LegPhase);
+        double tailDx = Offset(TailY, bug.LegPhase);
+
+        dc.PushTransform(new TranslateTransform(tailDx, 0));
         dc.DrawGeometry(null, hindLegPen, leftHindLeg);
         dc.DrawGeometry(null, hindLegPen, rightHindLeg);
+        dc.Pop();
 
-        dc.PushTransform(new TranslateTransform(BodyMotion.Bob(bug.LegPhase, scale), 0));
+        // headDx is pushed twice: the antennae go under the segments and the head goes over them,
+        // the same z-order as before the wave.
+        dc.PushTransform(new TranslateTransform(headDx, 0));
         BodyMotion.DrawAntenna(dc, antennaPen, leftAntenna, new Point(-5, -78), bug.LegPhase, 0.0);
         BodyMotion.DrawAntenna(dc, antennaPen, rightAntenna, new Point(5, -78), bug.LegPhase, Math.PI);
+        dc.Pop();
+
         for (int i = 0; i < AnimatedPairs; i++)
         {
-            dc.DrawEllipse(body, outline, new Point(0, FirstSegmentY + SegmentSpacing * i), 9, 7);
+            double y = FirstSegmentY + (SegmentSpacing * i);
+            dc.DrawEllipse(body, outline, new Point(Offset(y, bug.LegPhase), y), 9, 7);
         }
 
-        dc.DrawEllipse(body, outline, new Point(0, 59), 8, 6.5);
-        dc.DrawEllipse(dark, null, new Point(0, -72), 9, 8);
+        dc.DrawEllipse(body, outline, new Point(tailDx, TailY), 8, 6.5);
+
+        dc.PushTransform(new TranslateTransform(headDx, 0));
+        dc.DrawEllipse(dark, null, new Point(0, HeadY), 9, 8);
         dc.DrawEllipse(black, null, new Point(-4, -75), 1.5, 1.5);
         dc.DrawEllipse(black, null, new Point(4, -75), 1.5, 1.5);
         dc.Pop();
 
         dc.Pop();
     }
+
+    private double Offset(double y, float legPhase) => Wave.OffsetAt(y, legPhase, scale);
 }
